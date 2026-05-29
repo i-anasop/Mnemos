@@ -4,8 +4,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import Link from 'next/link';
 import AgentFeed from '@/components/agent/AgentFeed';
-import MemoryExplorer from '@/components/memory/MemoryExplorer';
+import AnswerCard from '@/components/agent/AnswerCard';
 import QueryInput from '@/components/workspace/QueryInput';
+import MemoryDrawer from '@/components/workspace/MemoryDrawer';
+import Icon from '@/components/ui/Icon';
+import { MnemosMark } from '@/components/ui/Brand';
 import type { AgentEvent, BlobMetadata, SynthesisDocument } from '@/types';
 
 // Stable demo user ID — in production this comes from the connected Sui wallet
@@ -17,6 +20,15 @@ interface BlobDetail {
   raw?: Record<string, unknown>;
 }
 
+interface Answer {
+  query: string;
+  synthesis: SynthesisDocument;
+  blobId?: string;
+  durationMs?: number;
+  sessionId?: string;
+  createdAt?: number;
+}
+
 export default function WorkspacePage() {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -24,7 +36,9 @@ export default function WorkspacePage() {
   const [selectedBlobId, setSelectedBlobId] = useState<string | null>(null);
   const [blobDetail, setBlobDetail] = useState<BlobDetail | null>(null);
   const [isBlobsLoading, setIsBlobsLoading] = useState(false);
-  const [lastSynthesis, setLastSynthesis] = useState<SynthesisDocument | null>(null);
+  const [answer, setAnswer] = useState<Answer | null>(null);
+  const [currentQuery, setCurrentQuery] = useState<string>('');
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const sessionIdRef = useRef<string>(uuidv4());
   const feedBottomRef = useRef<HTMLDivElement>(null);
 
@@ -48,7 +62,7 @@ export default function WorkspacePage() {
   // Auto-scroll feed to bottom
   useEffect(() => {
     feedBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [events]);
+  }, [events, answer]);
 
   const handleBlobSelect = useCallback(async (blobId: string) => {
     setSelectedBlobId(blobId);
@@ -65,13 +79,19 @@ export default function WorkspacePage() {
     }
   }, []);
 
+  const handleBackToList = useCallback(() => {
+    setSelectedBlobId(null);
+    setBlobDetail(null);
+  }, []);
+
   const handleQuery = useCallback(async (query: string) => {
     if (isRunning) return;
 
     const sessionId = uuidv4();
     sessionIdRef.current = sessionId;
     setEvents([]);
-    setLastSynthesis(null);
+    setAnswer(null);
+    setCurrentQuery(query);
     setIsRunning(true);
 
     try {
@@ -105,6 +125,16 @@ export default function WorkspacePage() {
             setEvents(prev => [...prev, event]);
 
             if (event.event === 'session_complete') {
+              if (event.synthesis) {
+                setAnswer({
+                  query,
+                  synthesis: event.synthesis,
+                  blobId: event.blob_id,
+                  durationMs: event.duration_ms,
+                  sessionId,
+                  createdAt: Date.now(),
+                });
+              }
               void refreshBlobs();
             }
           } catch {
@@ -120,179 +150,115 @@ export default function WorkspacePage() {
     }
   }, [isRunning, refreshBlobs]);
 
-  // Derive synthesis from last session_complete event
-  useEffect(() => {
-    const complete = [...events].reverse().find(e => e.event === 'synthesis_complete');
-    if (complete && complete.event === 'synthesis_complete') {
-      setLastSynthesis({
-        synthesis_goal: '',
-        themes: complete.themes.map(label => ({ label, supporting_findings: [], strength: complete.confidence })),
-        knowledge_gaps: [],
-        contradictions: [],
-        confidence: complete.confidence,
-        confidence_delta: complete.confidence_delta,
-        session_id: sessionIdRef.current,
-        agent: 'synthesizer',
-      });
-    }
-  }, [events]);
-
   const lastMemoryLoaded = events.find(e => e.event === 'memory_loaded');
   const memoryCount = lastMemoryLoaded?.event === 'memory_loaded' ? lastMemoryLoaded.count : 0;
+  const hasActivity = currentQuery !== '' || events.length > 0;
 
   return (
-    <div className="h-screen flex flex-col bg-[#0a0a0a] overflow-hidden">
-      {/* Top bar */}
-      <header className="border-b border-[#1f1f1f] px-5 py-3 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-4">
-          <Link href="/" className="text-xs font-mono text-[#06b6d4] tracking-widest uppercase hover:opacity-70 transition-opacity">
-            Mnemos
+    <div className="h-screen flex flex-col bg-[#f6f5f1] overflow-hidden">
+      {/* ─── Top bar ─────────────────────────────────────────────────────── */}
+      <header className="flex items-center justify-between px-5 sm:px-7 py-3.5 border-b border-[#e6e4dc] bg-[#f6f5f1]/80 backdrop-blur-md flex-shrink-0 z-20">
+        <div className="flex items-center gap-2.5">
+          <Link href="/" className="flex items-center gap-2.5 group">
+            <MnemosMark size={28} className="group-hover:scale-105 transition-transform" />
+            <span className="text-base font-bold tracking-tight">Mnemos</span>
           </Link>
-          <span className="text-[#1f1f1f]">|</span>
-          <span className="text-xs text-[#555] font-mono">Research Workspace</span>
+          <span className="hidden sm:inline-flex items-center gap-1.5 pill pill-ghost text-[11px] px-2.5 py-1">
+            <span className="w-1.5 h-1.5 rounded-full grad-bg" />
+            Powered by Walrus
+          </span>
         </div>
-        <div className="flex items-center gap-3">
-          {memoryCount > 0 && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#06b6d4]/10 border border-[#06b6d4]/20">
-              <span className="w-1 h-1 rounded-full bg-[#06b6d4]" />
-              <span className="text-[10px] font-mono text-[#06b6d4]">{memoryCount} memories loaded</span>
-            </div>
+
+        <button
+          onClick={() => setIsDrawerOpen(true)}
+          className="pill pill-ink text-sm px-4 py-2"
+        >
+          <Icon name="layers" size={15} className="text-white" />
+          Memory
+          {blobs.length > 0 && (
+            <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-white/20 text-[10px] leading-none">
+              {blobs.length}
+            </span>
           )}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[#1f1f1f]">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#555]" />
-            <span className="text-[10px] font-mono text-[#555]">{DEMO_USER_ID}</span>
-          </div>
-        </div>
+        </button>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left sidebar — Memory Explorer */}
-        <aside className="w-64 border-r border-[#1f1f1f] flex flex-col flex-shrink-0 overflow-hidden">
-          <div className="px-4 py-3 border-b border-[#1f1f1f] flex items-center justify-between">
-            <span className="text-[10px] font-mono text-[#555] uppercase tracking-wider">Memory</span>
-            <span className="text-[10px] font-mono text-[#333]">Walrus</span>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            <MemoryExplorer
-              blobs={blobs}
-              selectedBlobId={selectedBlobId}
-              onSelect={handleBlobSelect}
-              isLoading={isBlobsLoading}
-            />
-          </div>
-        </aside>
+      {/* ─── Main centered column ────────────────────────────────────────── */}
+      <main className="flex-1 flex flex-col overflow-hidden relative">
+        {/* single soft pastel wash near the bottom */}
+        <div className="bloom-band bottom-24 h-48 opacity-70" />
 
-        {/* Main — Query + Agent Feed */}
-        <main className="flex-1 flex flex-col overflow-hidden">
-          {/* Query input */}
-          <div className="p-5 border-b border-[#1f1f1f] flex-shrink-0">
-            <QueryInput onSubmit={handleQuery} isRunning={isRunning} />
-          </div>
-
-          {/* Confidence bar (shown after synthesis) */}
-          {lastSynthesis && (
-            <div className="px-5 py-3 border-b border-[#1f1f1f] flex items-center gap-4 flex-shrink-0 bg-[#0d0d0d]">
-              <span className="text-[10px] font-mono text-[#555] w-20 flex-shrink-0">Confidence</span>
-              <div className="flex-1 h-1 bg-[#1a1a1a] rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-[#06b6d4] rounded-full transition-all duration-700"
-                  style={{ width: `${lastSynthesis.confidence * 100}%` }}
-                />
+        <div className="flex-1 overflow-y-auto relative z-10">
+          <div className="max-w-2xl mx-auto px-5 py-8 w-full">
+            {!hasActivity ? (
+              /* Empty hero state — centered with whitespace */
+              <div className="min-h-[58vh] flex items-center justify-center">
+                <AgentFeed events={events} isRunning={isRunning} />
               </div>
-              <span className="text-[10px] font-mono text-[#06b6d4] w-12 text-right">
-                {(lastSynthesis.confidence * 100).toFixed(0)}%
-              </span>
-              {lastSynthesis.confidence_delta !== 0 && (
-                <span className={`text-[10px] font-mono ${lastSynthesis.confidence_delta > 0 ? 'text-[#22c55e]' : 'text-[#ef4444]'}`}>
-                  {lastSynthesis.confidence_delta > 0 ? '+' : ''}{(lastSynthesis.confidence_delta * 100).toFixed(0)}%
-                </span>
-              )}
-            </div>
-          )}
+            ) : (
+              <>
+                {/* User query bubble */}
+                {currentQuery && (
+                  <div className="mb-7 flex justify-end anim-fade-up">
+                    <div className="bg-[#0e0e0e] text-white rounded-[1.4rem] rounded-tr-md px-5 py-3.5 max-w-[85%] shadow-float">
+                      <p className="text-[15px] leading-relaxed">{currentQuery}</p>
+                    </div>
+                  </div>
+                )}
 
-          {/* Agent activity feed */}
-          <div className="flex-1 overflow-y-auto">
-            <AgentFeed events={events} isRunning={isRunning} />
+                {/* Memory-recalled hint */}
+                {memoryCount > 0 && (
+                  <div className="mb-5 inline-flex items-center gap-2 pill text-xs px-3 py-1.5 grad-bg text-white anim-fade-up shadow-float">
+                    <Icon name="search" size={13} className="text-white" />
+                    {memoryCount} prior memor{memoryCount !== 1 ? 'ies' : 'y'} recalled from Walrus
+                  </div>
+                )}
+
+                {/* Stage timeline */}
+                <AgentFeed events={events} isRunning={isRunning} />
+
+                {/* Answer */}
+                {answer && !isRunning && (
+                  <div className="mt-6">
+                    <AnswerCard
+                      query={answer.query}
+                      synthesis={answer.synthesis}
+                      blobId={answer.blobId}
+                      durationMs={answer.durationMs}
+                      sessionId={answer.sessionId}
+                      createdAt={answer.createdAt}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+
             <div ref={feedBottomRef} />
           </div>
-        </main>
+        </div>
 
-        {/* Right panel — Blob detail */}
-        <aside className="w-72 border-l border-[#1f1f1f] flex flex-col flex-shrink-0 overflow-hidden">
-          <div className="px-4 py-3 border-b border-[#1f1f1f]">
-            <span className="text-[10px] font-mono text-[#555] uppercase tracking-wider">Blob Detail</span>
+        {/* ─── Input dock ────────────────────────────────────────────────── */}
+        <div className="flex-shrink-0 border-t border-[#e6e4dc] bg-[#f6f5f1]/90 backdrop-blur-md relative z-10">
+          <div className="max-w-2xl mx-auto px-5 py-4 w-full">
+            <QueryInput onSubmit={handleQuery} isRunning={isRunning} />
+            <p className="text-center text-[11px] text-[#9a9a93] mt-2.5">
+              Mnemos recalls from Walrus · researches · stores new memory — verifiably.
+            </p>
           </div>
+        </div>
+      </main>
 
-          {blobDetail ? (
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {/* Blob ID */}
-              <div>
-                <p className="text-[9px] font-mono text-[#444] uppercase mb-1">Blob ID</p>
-                <p className="text-[10px] font-mono text-[#06b6d4] break-all">{blobDetail.blob_id}</p>
-              </div>
-
-              {/* Walrus link */}
-              <a
-                href={`${process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL ?? 'https://aggregator.walrus-testnet.walrus.space'}/v1/blobs/${blobDetail.blob_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block text-[10px] font-mono text-[#555] hover:text-[#888] transition-colors underline underline-offset-2"
-              >
-                View on Walrus ↗
-              </a>
-
-              {/* Synthesis content */}
-              {blobDetail.synthesis?.themes && (
-                <div>
-                  <p className="text-[9px] font-mono text-[#444] uppercase mb-2">Themes</p>
-                  <div className="space-y-1.5">
-                    {blobDetail.synthesis.themes.map((theme, i) => (
-                      <div key={i} className="p-2 rounded bg-[#111] border border-[#1a1a1a]">
-                        <p className="text-[10px] font-semibold text-[#06b6d4]">{theme.label}</p>
-                        <div className="mt-1 h-0.5 bg-[#1a1a1a] rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-[#06b6d4]/40 rounded-full"
-                            style={{ width: `${(theme.strength ?? 0.5) * 100}%` }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {blobDetail.synthesis?.knowledge_gaps && blobDetail.synthesis.knowledge_gaps.length > 0 && (
-                <div>
-                  <p className="text-[9px] font-mono text-[#444] uppercase mb-2">Knowledge Gaps</p>
-                  <ul className="space-y-1">
-                    {blobDetail.synthesis.knowledge_gaps.map((gap, i) => (
-                      <li key={i} className="text-[10px] text-[#666] flex gap-2">
-                        <span className="text-[#333] flex-shrink-0">·</span>
-                        {gap}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Raw JSON */}
-              <div>
-                <p className="text-[9px] font-mono text-[#444] uppercase mb-1">Raw JSON</p>
-                <pre className="text-[9px] font-mono text-[#444] bg-[#0d0d0d] p-3 rounded border border-[#1a1a1a] overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
-                  {JSON.stringify(blobDetail.raw, null, 2)}
-                </pre>
-              </div>
-            </div>
-          ) : (
-            <div className="flex-1 flex items-center justify-center px-4 text-center">
-              <div>
-                <div className="text-2xl text-[#1f1f1f] mb-2 font-mono">◎</div>
-                <p className="text-xs text-[#333]">Select a memory blob to inspect</p>
-              </div>
-            </div>
-          )}
-        </aside>
-      </div>
+      {/* ─── Memory drawer ───────────────────────────────────────────────── */}
+      <MemoryDrawer
+        isOpen={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+        blobs={blobs}
+        selectedBlobId={selectedBlobId}
+        onSelect={handleBlobSelect}
+        isLoading={isBlobsLoading}
+        blobDetail={blobDetail}
+        onBack={handleBackToList}
+      />
     </div>
   );
 }

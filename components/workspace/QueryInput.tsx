@@ -8,10 +8,10 @@ interface QueryInputProps {
 }
 
 const PLACEHOLDER_QUERIES = [
-  'What are the key risks of AI proliferation in critical infrastructure?',
+  'What are the key risks of AI in critical infrastructure?',
   'How should organizations approach AI governance in 2026?',
   'What are the emerging patterns in multi-agent AI systems?',
-  'Analyze the implications of decentralized AI memory systems',
+  'Analyze the implications of decentralized AI memory',
 ];
 
 export default function QueryInput({ onSubmit, isRunning }: QueryInputProps) {
@@ -32,7 +32,7 @@ export default function QueryInput({ onSubmit, isRunning }: QueryInputProps) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
@@ -43,35 +43,39 @@ export default function QueryInput({ onSubmit, isRunning }: QueryInputProps) {
     const ta = textareaRef.current;
     if (!ta) return;
     ta.style.height = 'auto';
-    ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+    ta.style.height = `${Math.min(ta.scrollHeight, 140)}px`;
   }, [query]);
 
   return (
-    <div className="border border-[#1f1f1f] rounded-xl bg-[#111] focus-within:border-[#06b6d4]/40 transition-colors p-4">
+    <div className="bg-white border-[1.5px] border-[#0e0e0e] rounded-[1.75rem] shadow-[0_12px_40px_-16px_rgba(0,0,0,0.25)] focus-within:shadow-[0_16px_48px_-14px_rgba(99,102,241,0.35)] transition-shadow px-5 py-4">
       <textarea
         ref={textareaRef}
         value={query}
-        onChange={e => setQuery(e.target.value)}
+        onChange={(e) => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder={placeholder}
+        placeholder="Ask Mnemos to remember something…"
         disabled={isRunning}
-        rows={2}
-        className="w-full bg-transparent text-sm text-[#f0f0f0] placeholder-[#333] resize-none outline-none leading-relaxed disabled:opacity-50"
+        rows={1}
+        aria-label="Research query"
+        className="w-full bg-transparent text-[15px] text-[#0e0e0e] placeholder-[#b3b1a8] resize-none outline-none leading-relaxed disabled:opacity-50"
       />
-      <div className="flex items-center justify-between mt-3 pt-3 border-t border-[#1a1a1a]">
-        <span className="text-[10px] text-[#444] font-mono">
+      <div className="flex items-center justify-between mt-3">
+        <span className="text-xs text-[#9a9a93]">
           {isRunning ? (
-            <span className="text-[#06b6d4]">● Running…</span>
+            <span className="flex items-center gap-1.5 text-[#6366f1] font-medium">
+              <span className="w-1.5 h-1.5 rounded-full grad-bg animate-pulse" />
+              Thinking…
+            </span>
           ) : (
-            '⌘↵ to submit'
+            <span className="hidden sm:inline">{placeholder}</span>
           )}
         </span>
         <button
           onClick={handleSubmit}
           disabled={!query.trim() || isRunning}
-          className="px-5 py-1.5 rounded-md bg-[#06b6d4] text-black text-xs font-semibold hover:bg-[#0891b2] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          className="pill pill-ink text-sm px-6 py-2.5 disabled:opacity-25 disabled:cursor-not-allowed"
         >
-          {isRunning ? 'Running…' : 'Research →'}
+          {isRunning ? 'Running…' : 'Ask  ↵'}
         </button>
       </div>
     </div>

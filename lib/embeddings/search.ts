@@ -20,6 +20,7 @@ export function searchVectors(
   index: VectorIndex,
   queryVector: number[],
   topK = 5,
+  minScore = 0,
 ): ScoredEntry[] {
   if (index.entries.length === 0) return [];
 
@@ -29,7 +30,8 @@ export function searchVectors(
   }));
 
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, topK);
+  // Drop semantically-unrelated noise (e.g. greetings matching at ~0.1).
+  return scored.filter(s => s.score >= minScore).slice(0, topK);
 }
 
 export function addToIndex(index: VectorIndex, entry: VectorEntry): VectorIndex {

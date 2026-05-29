@@ -42,11 +42,7 @@ function buildRetrievalReason(score: number, blob: MemoryBlob): string {
   else if (daysSince < 7)  parts.push(`${Math.floor(daysSince)}d ago`);
   else if (daysSince < 30) parts.push(`${Math.floor(daysSince)}d old`);
 
-  const conf = (blob.content as { confidence?: number }).confidence;
-  if (typeof conf === 'number' && conf >= 0.85) {
-    parts.push(`${(conf * 100).toFixed(0)}% confidence`);
-  }
-
+  // Confidence is surfaced as its own chip in the UI — don't duplicate it here.
   return parts.join(' · ');
 }
 
@@ -177,8 +173,9 @@ export async function runOrchestrator(params: {
   emit({ event: 'synthesis_start' });
 
   // Pass memory blobs as their actual content — the synthesizer uses them as
-  // JSON context for comparison, not as typed ResearchReport structs
-  const memoryReports = memoryBlobs.map(b => b.content as unknown as ResearchReport);
+  // JSON context for comparison, not as typed ResearchReport structs.
+  // Cap to the top 3 to keep the synthesis prompt within rate-limit budgets.
+  const memoryReports = memoryBlobs.slice(0, 3).map(b => b.content as unknown as ResearchReport);
 
   const synthesis = await runSynthesizer({
     current_reports: [report],
@@ -218,6 +215,7 @@ export async function runOrchestrator(params: {
     summary: `Synthesized ${synthesis.themes.length} themes from ${report.findings.length} findings. Confidence: ${(synthesis.confidence * 100).toFixed(0)}%.`,
     duration_ms,
     blob_id,
+    synthesis,
   });
 
   return { synthesis, blob_id };

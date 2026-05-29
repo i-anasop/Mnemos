@@ -114,6 +114,10 @@ export async function storeMemory(params: {
   return blobId;
 }
 
+// Minimum cosine similarity for a memory to count as "relevant". Below this,
+// a match is noise (e.g. "Hi" weakly correlating with stored research at ~0.1).
+const MIN_RELEVANCE = Number(process.env.MNEMOS_MIN_RELEVANCE ?? 0.4);
+
 export async function retrieveMemory(params: {
   query: string;
   user_id: string;
@@ -125,7 +129,8 @@ export async function retrieveMemory(params: {
   if (index.entries.length === 0) return { blobs: [], blobIds: [], scored: [] };
 
   const queryVector = await embed(query);
-  const nearest = searchVectors(index, queryVector, top_k);
+  const nearest = searchVectors(index, queryVector, top_k, MIN_RELEVANCE);
+  if (nearest.length === 0) return { blobs: [], blobIds: [], scored: [] };
 
   const fetched = await Promise.all(
     nearest.map(async ({ entry }) => {

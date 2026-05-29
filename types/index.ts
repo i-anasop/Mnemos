@@ -121,7 +121,7 @@ export type AgentEvent =
   | { event: 'memory_committing' }
   | { event: 'memory_committed';   blob_id: string; type: string }
   | { event: 'walrus_warning';     message: string }
-  | { event: 'session_complete';   summary: string; duration_ms: number; blob_id?: string }
+  | { event: 'session_complete';   summary: string; duration_ms: number; blob_id?: string; synthesis?: SynthesisDocument }
   | { event: 'error';              message: string; recoverable: boolean };
 
 // ─── Session ─────────────────────────────────────────────────────────────────

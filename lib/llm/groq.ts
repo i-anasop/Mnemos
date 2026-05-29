@@ -36,14 +36,33 @@ export class GroqProvider implements LLMProvider {
       body.response_format = { type: 'json_object' };
     }
 
-    const res = await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
+    // Retry on transient rate-limit (429) with backoff honoring Groq's hint.
+    const MAX_RETRIES = 3;
+    let res!: Response;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      res = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (res.status !== 429 || attempt === MAX_RETRIES) break;
+
+      const retryText = await res.text();
+      // Groq returns "Please try again in 16.26s"; fall back to exponential backoff.
+      const hinted = retryText.match(/try again in ([\d.]+)s/i);
+      const headerWait = Number(res.headers.get('retry-after'));
+      const waitSec = hinted
+        ? parseFloat(hinted[1])
+        : Number.isFinite(headerWait) && headerWait > 0
+          ? headerWait
+          : 2 ** attempt;
+      // Cap the wait so the SSE stream never hangs too long.
+      await new Promise(r => setTimeout(r, Math.min(waitSec + 0.5, 20) * 1000));
+    }
 
     if (!res.ok) throw new Error(`Groq ${res.status}: ${await res.text()}`);
 
