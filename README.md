@@ -1,173 +1,260 @@
+<div align="center">
+
 # Mnemos
 
 **AI research orchestration with persistent, verifiable memory — powered by Walrus.**
 
-Mnemos is a multi-agent research system where every session builds on prior knowledge. Memories are stored as blobs on [Walrus](https://walrus.xyz) (Sui's decentralized storage network), semantically indexed, and automatically rehydrated on startup. The agent gets smarter every session.
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue?logo=typescript)](https://typescriptlang.org)
+[![Walrus](https://img.shields.io/badge/Storage-Walrus%20Testnet-00c2ff)](https://walrus.xyz)
+[![Sui](https://img.shields.io/badge/Chain-Sui-6fbcf0?logo=sui)](https://sui.io)
 
-Built for [Sui Overflow 2026](https://suioverflow.com) — Walrus Track.
+*Built for [Sui Overflow 2026](https://suioverflow.com) — Walrus Track*
 
----
-
-## How It Works
-
-1. You submit a research question
-2. The **Orchestrator** retrieves semantically similar prior memories from Walrus
-3. The **Researcher** agent generates structured findings, informed by prior context
-4. The **Synthesizer** agent cross-references new and prior findings, calculates a confidence delta
-5. The synthesis is embedded (Voyage AI) and committed as a new blob on Walrus
-6. The vector index is updated and persisted — memory survives server restarts
-
-All memory data lives on Walrus testnet. The local `data/registry.json` is just a pointer (`userId → indexBlobId`) that tells the app where to find the index on startup.
+</div>
 
 ---
 
-## Quick Start
+## What is Mnemos?
 
-```bash
-git clone <repo>
-cd mnemos
-npm install
-cp .env.local.example .env.local
-# fill in your keys (see below)
-npm run dev
-```
+AI agents are stateless. Every session starts from zero — the user becomes the memory layer, re-explaining context over and over. **Mnemos fixes this.**
 
-Open [http://localhost:3000/workspace](http://localhost:3000/workspace).
+Mnemos is a multi-agent research system where every session builds on prior knowledge. Memories are stored as content-addressed blobs on [Walrus](https://walrus.xyz) (Sui's decentralized storage network), semantically indexed with vector embeddings, and automatically rehydrated on startup. **The agent gets smarter every session.**
 
----
+### Key Properties
 
-## Environment Variables
-
-Copy `.env.local.example` to `.env.local` and fill in:
-
-| Variable | Required | Where to get it |
-|----------|----------|----------------|
-| `GROQ_API_KEY` | Yes (free) | [console.groq.com](https://console.groq.com) |
-| `VOYAGE_API_KEY` | Yes (free tier) | [dashboard.voyageai.com](https://dashboard.voyageai.com) |
-| `WALRUS_PUBLISHER_URL` | Defaults to testnet | — |
-| `WALRUS_AGGREGATOR_URL` | Defaults to testnet | — |
-| `GEMINI_API_KEY` | Optional fallback | [aistudio.google.com](https://aistudio.google.com/apikey) |
-| `ANTHROPIC_API_KEY` | Optional fallback | [console.anthropic.com](https://console.anthropic.com) |
-
-LLM priority: **Groq → Gemini → Anthropic**. Only one is needed.
-
-> **Note:** If using Gemini free tier, use a key from a project *without* billing enabled — billing zeroes out the free quota.
+- **Persistent** — memory survives server restarts; the vector index lives on Walrus, not in RAM
+- **Verifiable** — every memory blob has a public `blob_id` readable directly from the Walrus aggregator
+- **Semantic** — retrieval is cosine similarity over Voyage AI embeddings, not keyword search
+- **Explainable** — each retrieval emits a score and plain-English reason in the live agent feed
+- **Portable** — memory is user-owned; no lock-in to a single session or server
 
 ---
 
 ## Architecture
 
 ```
-Browser (Next.js)
-    │
-    ├── /workspace          — 3-panel UI: Memory Explorer · Agent Feed · Blob Detail
-    │
-API Routes (Node.js runtime)
-    │
-    ├── POST /api/agent     — SSE stream, runs the full orchestration pipeline
-    ├── GET  /api/memory    — Lists memory blob metadata for a user
-    ├── POST /api/memory    — Fetches full blob content from Walrus
-    ├── POST /api/embed     — Voyage AI embedding endpoint
-    └── GET  /api/diagnostic — Health check: LLM + Voyage + Walrus + Memory Index
-    │
-Engine (lib/)
-    ├── agents/
-    │   ├── orchestrator.ts — 4-phase pipeline, SSE emitter, memory lifecycle
-    │   ├── researcher.ts   — Structured JSON research reports (Zod-validated)
-    │   └── synthesizer.ts  — Cross-session synthesis, confidence delta
-    │
-    ├── walrus/
-    │   ├── client.ts       — REST wrapper: store, fetch, retry
-    │   └── memory.ts       — MemoryStore: index cache, Walrus persistence, registry
-    │
-    ├── embeddings/
-    │   ├── voyage.ts       — Voyage AI REST client (voyage-3-lite, 512-dim)
-    │   └── search.ts       — Pure-JS cosine similarity, scored retrieval
-    │
-    ├── llm/
-    │   ├── index.ts        — Provider factory (Groq → Gemini → Anthropic)
-    │   ├── groq.ts         — Groq provider (llama-3.1-8b-instant)
-    │   ├── gemini.ts       — Gemini provider (gemini-2.0-flash)
-    │   └── anthropic.ts    — Anthropic provider (claude-haiku-4-5)
-    │
-    └── sui/
-        └── registry.ts     — Sui registry stub (Phase 2)
+┌─────────────────────────────────────────────────────┐
+│                   Browser (Next.js)                  │
+│  Memory Explorer │ Agent Feed │ Blob Detail          │
+└──────────────┬──────────────────────────────────────┘
+               │ SSE stream
+┌──────────────▼──────────────────────────────────────┐
+│              Orchestrator Agent                       │
+│  1. Retrieve similar memories from Walrus             │
+│  2. Emit memory_selected with scores + reasons        │
+│  3. Inject structured context into Researcher         │
+│  4. Run Researcher → Synthesizer pipeline             │
+│  5. Commit synthesis blob to Walrus                   │
+│  6. Update vector index on Walrus                     │
+└──────┬──────────────┬──────────────────┬────────────┘
+       │              │                  │
+┌──────▼──────┐ ┌─────▼──────┐  ┌───────▼──────┐
+│  Researcher │ │Synthesizer │  │  Walrus REST  │
+│  (Groq LLM) │ │ (Groq LLM) │  │  publisher + │
+│  Zod + retry│ │ Zod + retry│  │  aggregator  │
+└─────────────┘ └────────────┘  └──────────────┘
+```
+
+### Memory Persistence Model
+
+```
+storeMemory()
+  ├── embed content          → Voyage AI (512-dim)
+  ├── store memory blob      → Walrus (blob_id_A)
+  ├── store embedding blob   → Walrus (blob_id_B)
+  ├── update VectorIndex     → Walrus (blob_id_C)  ← latest index
+  └── write registry         → data/registry.json  ← pointer to blob_id_C
+
+On server restart:
+  loadIndex()
+  ├── read registry.json     → blob_id_C
+  └── fetch VectorIndex      → Walrus aggregator ✓
 ```
 
 ---
 
-## Memory Persistence
+## Agent Feed — Live SSE Events
 
-Memory survives server restarts. Here's why:
-
-- Every `storeMemory` call writes the blob and an updated vector index to **Walrus**
-- The index blob ID is saved locally to `data/registry.json` (gitignored)
-- On startup, `loadIndex` reads the registry file, fetches the index from Walrus, and rehydrates the in-memory search cache
-- **Proof**: hit `/api/diagnostic` after a cold restart — it fetches and verifies the index from Walrus before any query runs
+| Event | Description |
+|-------|-------------|
+| `session_start` | New session opened |
+| `memory_loaded` | N prior blobs retrieved from Walrus |
+| `memory_selected` | Per-blob: cosine score, confidence, reason string |
+| `research_start` | Researcher agent begins |
+| `research_complete` | N findings, confidence score |
+| `synthesis_start` | Synthesizer cross-referencing sessions |
+| `synthesis_complete` | Themes, confidence delta vs. prior sessions |
+| `memory_committing` | Writing to Walrus testnet |
+| `memory_committed` | Blob ID confirmed on Walrus |
+| `session_complete` | Duration, summary |
 
 ---
 
-## Walrus Integration
+## Quick Start
 
-| What | Blob type | Written by |
-|------|-----------|------------|
-| Synthesis documents | JSON | `storeMemory` on every session |
-| Embedding vectors | Binary `Float32Array` | `storeMemory` on every session |
-| Vector index snapshots | JSON | `saveIndex` after every write |
+**Prerequisites:** Node.js 18+, a free [Groq](https://console.groq.com) key, a free [Voyage AI](https://dashboard.voyageai.com) key.
 
-All blobs are content-addressed. Blob IDs are visible in the Memory Explorer and link directly to the Walrus aggregator.
+```bash
+git clone https://github.com/i-anasop/Engine.git
+cd Engine
+npm install
+cp .env.local.example .env.local
+# Add your GROQ_API_KEY and VOYAGE_API_KEY
+npm run dev
+```
 
-Testnet endpoints:
-- Publisher: `https://publisher.walrus-testnet.walrus.space`
-- Aggregator: `https://aggregator.walrus-testnet.walrus.space`
+Open [http://localhost:3000](http://localhost:3000).
+
+---
+
+## Environment Variables
+
+Copy `.env.local.example` → `.env.local` and fill in your keys.
+
+| Variable | Required | Source |
+|----------|----------|--------|
+| `GROQ_API_KEY` | ✅ Yes — free | [console.groq.com](https://console.groq.com) |
+| `VOYAGE_API_KEY` | ✅ Yes — free tier | [dashboard.voyageai.com](https://dashboard.voyageai.com) |
+| `WALRUS_PUBLISHER_URL` | Defaults to testnet | — |
+| `WALRUS_AGGREGATOR_URL` | Defaults to testnet | — |
+| `GEMINI_API_KEY` | Optional fallback LLM | [aistudio.google.com](https://aistudio.google.com/apikey) |
+| `ANTHROPIC_API_KEY` | Optional fallback LLM | [console.anthropic.com](https://console.anthropic.com) |
+
+**LLM priority order:** Groq → Gemini → Anthropic. Only one is needed. Groq is free and fastest.
+
+> **Gemini note:** Use a key from a project *without* billing enabled — billing zeroes the free quota.
+
+---
+
+## Project Structure
+
+```
+mnemos/
+├── app/
+│   ├── api/
+│   │   ├── agent/        # SSE orchestration endpoint
+│   │   ├── diagnostic/   # Health check: LLM + Voyage + Walrus + index
+│   │   ├── embed/        # Voyage AI embedding endpoint
+│   │   └── memory/       # Blob list + blob content fetch
+│   ├── workspace/        # 3-panel research UI
+│   └── page.tsx          # Landing page
+├── components/
+│   ├── agent/            # AgentFeed — live SSE event renderer
+│   ├── memory/           # MemoryExplorer — blob list sidebar
+│   └── workspace/        # QueryInput
+├── lib/
+│   ├── agents/
+│   │   ├── orchestrator.ts   # 4-phase pipeline + SSE emitter
+│   │   ├── researcher.ts     # Structured JSON reports (Zod-validated)
+│   │   └── synthesizer.ts    # Cross-session synthesis + confidence delta
+│   ├── embeddings/
+│   │   ├── voyage.ts         # Voyage AI REST client
+│   │   └── search.ts         # Pure-JS cosine similarity + scored retrieval
+│   ├── llm/
+│   │   ├── index.ts          # Provider factory (priority fallback)
+│   │   ├── groq.ts           # Groq — llama-3.1-8b-instant
+│   │   ├── gemini.ts         # Gemini — gemini-2.0-flash
+│   │   └── anthropic.ts      # Anthropic — claude-haiku-4-5
+│   ├── walrus/
+│   │   ├── client.ts         # REST wrapper: store, fetch, retry
+│   │   └── memory.ts         # MemoryStore: index, persistence, registry
+│   └── sui/
+│       └── registry.ts       # Sui registry stub (Phase 2)
+└── types/
+    └── index.ts              # All shared TypeScript interfaces
+```
 
 ---
 
 ## API Reference
 
 ### `POST /api/agent`
-Runs the full research workflow. Returns an SSE stream.
+Runs the full research + memory workflow. Returns a Server-Sent Events stream.
 
+**Request**
 ```json
 { "query": "string", "session_id": "string", "user_id": "string" }
 ```
 
-SSE events: `session_start` · `memory_loaded` · `memory_selected` · `research_start` · `research_complete` · `synthesis_start` · `synthesis_complete` · `memory_committing` · `memory_committed` · `session_complete` · `error`
+**Response** — SSE stream of `AgentEvent` objects (see types above).
+
+---
 
 ### `GET /api/memory?user_id=<id>`
-Returns blob metadata list for a user.
+Returns blob metadata list for a user, rehydrated from Walrus on first call.
+
+---
 
 ### `POST /api/memory`
-Fetches full blob content from Walrus.
+Fetches full blob content from the Walrus aggregator.
 ```json
 { "blob_id": "string" }
 ```
 
+---
+
 ### `GET /api/diagnostic`
-Health check. Returns status of LLM, Voyage AI, Walrus, and the memory index.
+Parallel health check — LLM response, Voyage embedding, Walrus store+fetch round-trip, and memory index entry count. Returns `200 ready` or `503 not_ready`.
+
+---
+
+## Walrus Integration
+
+All persistent data lives on Walrus testnet. Nothing is stored in a database.
+
+| Data | Format | Written by |
+|------|--------|-----------|
+| Synthesis documents | JSON blob | After every session |
+| Embedding vectors | Binary `Float32Array` | Per memory stored |
+| Vector index snapshots | JSON blob | After every write |
+
+Blob IDs are content-addressed — identical content returns the same ID. Every blob is publicly readable via the aggregator URL shown in the Memory Explorer.
+
+**Testnet endpoints:**
+- Publisher: `https://publisher.walrus-testnet.walrus.space`
+- Aggregator: `https://aggregator.walrus-testnet.walrus.space`
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Framework | Next.js 16 (App Router, Turbopack) |
-| Language | TypeScript (strict) |
+| | Technology |
+|-|-----------|
+| Framework | Next.js 16, App Router, Turbopack |
+| Language | TypeScript (strict mode) |
 | Styling | Tailwind CSS v4 |
-| Storage | Walrus testnet (decentralized blob storage) |
-| Embeddings | Voyage AI `voyage-3-lite` (512-dim) |
-| LLM | Groq / Gemini / Anthropic (provider abstraction) |
-| Validation | Zod |
-| Blockchain | Sui (registry stub, Phase 2) |
+| Storage | Walrus (Sui decentralized blob storage) |
+| Embeddings | Voyage AI `voyage-3-lite` — 512 dimensions |
+| LLM | Groq / Gemini / Anthropic (pluggable) |
+| Validation | Zod with retry on parse failure |
+| Streaming | Server-Sent Events (SSE) |
+| Blockchain | Sui (registry, Phase 2) |
 
 ---
 
 ## Scripts
 
 ```bash
-npm run dev       # Start development server (Turbopack)
-npm run build     # Production build
-npm run typecheck # TypeScript check (no emit)
-npm run lint      # ESLint
+npm run dev        # Development server (Turbopack)
+npm run build      # Production build
+npm run typecheck  # TypeScript check
+npm run lint       # ESLint
 ```
+
+---
+
+## Security
+
+- API keys are loaded server-side only — never exposed to the browser
+- `.env.local` is gitignored; use `.env.local.example` as the setup template
+- `data/registry.json` (local Walrus pointer) is gitignored — rebuilt automatically on startup
+- Walrus blobs on testnet are public; do not store sensitive content
+
+---
+
+<div align="center">
+
+Made by [Muhammad Anas](https://github.com/i-anasop) for Sui Overflow 2026
+
+</div>
