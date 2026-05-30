@@ -1,8 +1,10 @@
 <div align="center">
 
+<img src="public/brand/mnemos-logo.svg" width="96" alt="Mnemos logo" />
+
 # Mnemos
 
-**AI research orchestration with persistent, verifiable memory — powered by Walrus.**
+**A persistent AI memory engine — durable, verifiable memory powered by Walrus.**
 
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue?logo=typescript)](https://typescriptlang.org)
@@ -33,28 +35,9 @@ Mnemos is a multi-agent research system where every session builds on prior know
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────┐
-│                   Browser (Next.js)                  │
-│  Memory Explorer │ Agent Feed │ Blob Detail          │
-└──────────────┬──────────────────────────────────────┘
-               │ SSE stream
-┌──────────────▼──────────────────────────────────────┐
-│              Orchestrator Agent                       │
-│  1. Retrieve similar memories from Walrus             │
-│  2. Emit memory_selected with scores + reasons        │
-│  3. Inject structured context into Researcher         │
-│  4. Run Researcher → Synthesizer pipeline             │
-│  5. Commit synthesis blob to Walrus                   │
-│  6. Update vector index on Walrus                     │
-└──────┬──────────────┬──────────────────┬────────────┘
-       │              │                  │
-┌──────▼──────┐ ┌─────▼──────┐  ┌───────▼──────┐
-│  Researcher │ │Synthesizer │  │  Walrus REST  │
-│  (Groq LLM) │ │ (Groq LLM) │  │  publisher + │
-│  Zod + retry│ │ Zod + retry│  │  aggregator  │
-└─────────────┘ └────────────┘  └──────────────┘
-```
+<div align="center">
+  <img src="docs/architecture.svg" width="860" alt="Mnemos architecture diagram" />
+</div>
 
 ### Memory Persistence Model
 
@@ -221,12 +204,12 @@ Blob IDs are content-addressed — identical content returns the same ID. Every 
 
 | | Technology |
 |-|-----------|
-| Framework | Next.js 16, App Router, Turbopack |
+| Framework | Next.js 16, App Router |
 | Language | TypeScript (strict mode) |
-| Styling | Tailwind CSS v4 |
+| Styling | Tailwind CSS v4 · Satoshi (display) · Geist Mono |
 | Storage | Walrus (Sui decentralized blob storage) |
 | Embeddings | Voyage AI `voyage-3-lite` — 512 dimensions |
-| LLM | Groq / Gemini / Anthropic (pluggable) |
+| LLM | Groq / Gemini / Anthropic (pluggable) · 429 retry/backoff |
 | Validation | Zod with retry on parse failure |
 | Streaming | Server-Sent Events (SSE) |
 | Blockchain | Sui (registry, Phase 2) |

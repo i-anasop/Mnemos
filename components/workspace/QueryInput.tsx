@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import Icon from '@/components/ui/Icon';
 
 interface QueryInputProps {
   onSubmit: (query: string) => void;
@@ -47,35 +48,36 @@ export default function QueryInput({ onSubmit, isRunning }: QueryInputProps) {
   }, [query]);
 
   return (
-    <div className="bg-white border-[1.5px] border-[#0e0e0e] rounded-[1.75rem] shadow-[0_12px_40px_-16px_rgba(0,0,0,0.25)] focus-within:shadow-[0_16px_48px_-14px_rgba(99,102,241,0.35)] transition-shadow px-5 py-4">
+    <div className="bg-white border border-[#e6e4dc] rounded-[1.6rem] shadow-[0_8px_30px_-14px_rgba(0,0,0,0.18)] focus-within:border-[#c2c0b5] transition-colors px-4 py-3">
       <textarea
         ref={textareaRef}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Ask Mnemos to remember something…"
+        placeholder={placeholder}
         disabled={isRunning}
         rows={1}
         aria-label="Research query"
         className="w-full bg-transparent text-[15px] text-[#0e0e0e] placeholder-[#b3b1a8] resize-none outline-none leading-relaxed disabled:opacity-50"
       />
-      <div className="flex items-center justify-between mt-3">
-        <span className="text-xs text-[#9a9a93]">
+      <div className="flex items-center justify-between mt-2">
+        <span className="text-xs text-[#b3b1a8]">
           {isRunning ? (
             <span className="flex items-center gap-1.5 text-[#6366f1] font-medium">
               <span className="w-1.5 h-1.5 rounded-full grad-bg animate-pulse" />
               Thinking…
             </span>
           ) : (
-            <span className="hidden sm:inline">{placeholder}</span>
+            <span className="hidden sm:inline">↵ to send · ⇧↵ for a new line</span>
           )}
         </span>
         <button
           onClick={handleSubmit}
           disabled={!query.trim() || isRunning}
-          className="pill pill-ink text-sm px-6 py-2.5 disabled:opacity-25 disabled:cursor-not-allowed"
+          aria-label="Send"
+          className="w-9 h-9 rounded-full bg-[#0e0e0e] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-20 disabled:cursor-not-allowed transition-opacity"
         >
-          {isRunning ? 'Running…' : 'Ask  ↵'}
+          <Icon name="arrow-up-right" size={16} className="text-white -rotate-45" />
         </button>
       </div>
     </div>

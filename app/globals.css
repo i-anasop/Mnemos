@@ -8,7 +8,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: "Satoshi", var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 
   --color-paper: #f6f5f1;
@@ -55,7 +55,7 @@ html {
 body {
   background: var(--paper);
   color: var(--ink);
-  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Satoshi", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -178,6 +178,32 @@ body {
     z-index: 0;
   }
 
+  /* Aurora — the vibrant purple→blue→teal glow on a dark backdrop */
+  .aurora {
+    background:
+      radial-gradient(52% 44% at 50% 110%, rgba(45, 212, 191, 0.55) 0%, rgba(45, 212, 191, 0) 70%),
+      radial-gradient(58% 52% at 20% 116%, rgba(139, 92, 246, 0.55) 0%, rgba(139, 92, 246, 0) 72%),
+      radial-gradient(58% 52% at 80% 116%, rgba(56, 189, 248, 0.55) 0%, rgba(56, 189, 248, 0) 72%),
+      radial-gradient(40% 36% at 50% 118%, rgba(99, 102, 241, 0.5) 0%, rgba(99, 102, 241, 0) 70%);
+    pointer-events: none;
+  }
+  .aurora-soft {
+    background:
+      radial-gradient(50% 60% at 30% 0%, rgba(139, 92, 246, 0.3) 0%, transparent 70%),
+      radial-gradient(50% 60% at 70% 0%, rgba(56, 189, 248, 0.28) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .pill-light { background: #fff; color: #0e0e0e; }
+  .pill-light:hover { box-shadow: 0 12px 32px -8px rgba(255, 255, 255, 0.35); }
+
+  .pill-dim {
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+  }
+  .pill-dim:hover { background: rgba(255, 255, 255, 0.12); }
+
   /* Glossy 3D orb */
   .orb-3d {
     background:
@@ -267,4 +293,43 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .anim-float, .anim-spin-slow, .anim-spin-slower, .anim-pulse-ring { animation: none; }
+}
+
+/* ─── Section-snap landing + 3D scroll reveal ───────────────────────────── */
+.reveal3d {
+  opacity: 0;
+  transform: perspective(1300px) rotateX(9deg) translateY(60px) scale(0.95);
+  transform-origin: center bottom;
+  transition:
+    opacity 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+.reveal3d.in-view {
+  opacity: 1;
+  transform: perspective(1300px) rotateX(0) translateY(0) scale(1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal3d { opacity: 1; transform: none; transition: none; }
+}
+
+@layer utilities {
+  /* Hero/display headline — bold, tight, confident */
+  .display {
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    line-height: 0.92;
+  }
+
+  /* Storage-block decoration (stacked rounded squares) */
+  .storage-block {
+    border-radius: 0.5rem;
+    border: 1.5px solid var(--ink);
+    box-shadow: 0 4px 0 0 var(--ink);
+  }
+
+  /* Dashed receipt divider */
+  .receipt-edge {
+    border-top: 1.5px dashed rgba(14, 14, 14, 0.18);
+  }
 }
