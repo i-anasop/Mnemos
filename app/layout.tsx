@@ -24,17 +24,21 @@ const SUPPRESS_WALLET_ERROR = `(function(){
   window.addEventListener('unhandledrejection',function(e){var r=e&&e.reason;var m=r&&(r.message||r);if(isWalletClash(m)){e.stopImmediatePropagation();e.preventDefault();}},true);
 })();`;
 
+// Apply the saved theme before paint to avoid a flash.
+const THEME_INIT = `(function(){try{if(localStorage.getItem('mnemos-theme')==='dark'){document.documentElement.classList.add('dark');}}catch(e){}})();`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${geistMono.variable} h-full`}>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
         <link rel="preconnect" href="https://api.fontshare.com" crossOrigin="anonymous" />
         <link
           rel="stylesheet"
           href="https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&display=swap"
         />
       </head>
-      <body className="min-h-full antialiased bg-[#f6f5f1] text-[#0e0e0e]">
+      <body className="min-h-full antialiased bg-[var(--paper)] text-[var(--ink)]">
         <script dangerouslySetInnerHTML={{ __html: SUPPRESS_WALLET_ERROR }} />
         {children}
       </body>

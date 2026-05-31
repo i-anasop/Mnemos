@@ -29,7 +29,11 @@ export type IconName =
   | 'restart'
   | 'target'
   | 'lightbulb'
-  | 'copy';
+  | 'copy'
+  | 'mic'
+  | 'waveform'
+  | 'plus'
+  | 'globe';
 
 interface IconProps {
   name: IconName;
@@ -162,6 +166,20 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <rect x="8" y="8" width="13" height="13" rx="2" />
       <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+    </>
+  ),
+  mic: (
+    <>
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0M12 17v4" />
+    </>
+  ),
+  waveform: <path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
     </>
   ),
 };
