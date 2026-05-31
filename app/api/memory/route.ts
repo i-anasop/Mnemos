@@ -8,11 +8,12 @@ export const runtime = 'nodejs';
 // Returns the list of memory blob metadata for a user
 export async function GET(req: NextRequest) {
   const userId = req.nextUrl.searchParams.get('user_id');
+  const workspaceId = req.nextUrl.searchParams.get('workspace_id') ?? undefined;
   if (!userId) {
     return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
   }
 
-  const metadata = await getUserBlobMetadata(userId);
+  const metadata = await getUserBlobMetadata(userId, workspaceId);
   return NextResponse.json({ blobs: metadata });
 }
 
@@ -37,9 +38,13 @@ export async function POST(req: NextRequest) {
       metadata: {
         blob_id,
         type: blob.type,
+        workspace_id: blob.workspace_id ?? 'mnemos-demo',
         session_id: blob.session_id,
         created_at: blob.created_at,
         tags: blob.tags,
+        memory_type: blob.memory_type,
+        importance: blob.importance,
+        summary: blob.summary,
       },
       content: blob.content,
     };

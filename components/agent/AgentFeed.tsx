@@ -38,9 +38,14 @@ function MemoryRetrievalList({ retrievals }: { retrievals: MemoryRetrieval[] }) 
               <WalToken size={11} variant="white" />
               Walrus memory
             </span>
-            {r.confidence > 0 && (
+            {r.memory_type && (
+              <span className="chip-glass rounded-full px-2 py-0.5 text-[#4a4a45] capitalize font-medium">
+                {r.memory_type}
+              </span>
+            )}
+            {typeof r.importance === 'number' && r.importance > 0 && (
               <span className="chip-glass rounded-full px-2 py-0.5 text-[#4a4a45]">
-                {(r.confidence * 100).toFixed(0)}% confidence
+                {(r.importance * 100).toFixed(0)}% importance
               </span>
             )}
             {r.session_id && (
@@ -49,7 +54,7 @@ function MemoryRetrievalList({ retrievals }: { retrievals: MemoryRetrieval[] }) 
               </span>
             )}
             <span className="rounded-full px-2 py-0.5 font-mono text-[#9a9a93] bg-[#f0eee8]">
-              blob {r.blob_id.slice(0, 8)}…
+              {r.workspace_id}
             </span>
           </div>
         </div>
@@ -70,8 +75,11 @@ const STAGE: Record<string, StageStyle> = {
   research_complete:  { icon: 'check',   label: 'Research complete',       accent: '#22c55e', node: 'solid' },
   synthesis_start:    { icon: 'merge',   label: 'Synthesizing',            accent: '#a855f7', node: 'solid' },
   synthesis_complete: { icon: 'check',   label: 'Synthesis complete',      accent: '#22c55e', node: 'solid' },
+  memory_decision:    { icon: 'sparkle', label: 'Memory decision',         accent: '#a855f7', node: 'solid' },
   memory_committing:  { icon: 'commit',  label: 'Committing to Walrus',    accent: '#f59e0b', node: 'solid' },
   memory_committed:   { icon: 'database', label: 'Memory stored on Walrus', accent: '#06b6d4', node: 'grad' },
+  memory_skipped:     { icon: 'close',   label: 'Not worth storing',       accent: '#9a9a93', node: 'solid' },
+  casual_reply:       { icon: 'sparkle', label: 'Replied',                 accent: '#9a9a93', node: 'solid' },
   walrus_warning:     { icon: 'question', label: 'Walrus warning',         accent: '#f59e0b', node: 'solid' },
   session_complete:   { icon: 'check',   label: 'Done',                    accent: '#22c55e', node: 'solid' },
   error:              { icon: 'close',   label: 'Something went wrong',    accent: '#ef4444', node: 'solid' },
@@ -106,8 +114,18 @@ function StageRow({ event, isLast }: { event: AgentEvent; isLast: boolean }) {
       }
       case 'memory_committed':
         return (
-          <span className="font-mono text-[#06b6d4] text-xs">{event.blob_id.slice(0, 18)}…</span>
+          <span className="text-xs">
+            {event.memory_type && <span className="font-semibold capitalize">{event.memory_type}</span>}
+            {typeof event.importance === 'number' && <span className="text-[#6b6b66]"> · {(event.importance * 100).toFixed(0)}% importance</span>}
+            <span className="block font-mono text-[#06b6d4] mt-0.5">{event.blob_id.slice(0, 18)}…</span>
+          </span>
         );
+      case 'memory_decision':
+        return event.decision.should_store
+          ? <span className="text-[#6b6b66]">{event.decision.reason}</span>
+          : <span className="text-[#9a9a93]">{event.decision.reason}</span>;
+      case 'memory_skipped':
+        return <span className="text-[#9a9a93]">{event.reason}</span>;
       case 'walrus_warning':
       case 'error':
         return event.message;

@@ -6,23 +6,45 @@ export type MemoryBlobType =
   | 'synthesis_document'
   | 'embedding_index';
 
+// Semantic category of a stored memory (independent of the structural blob type).
+export type MemoryType =
+  | 'decision'
+  | 'architecture'
+  | 'research'
+  | 'preference'
+  | 'plan'
+  | 'insight'
+  | 'summary'
+  | 'constraint'
+  | 'incident'
+  | 'general';
+
 export interface MemoryBlob {
   schema_version: '1.0';
   type: MemoryBlobType;
+  workspace_id: string;
   session_id: string;
   user_id: string;
   created_at: string;
   tags: string[];
   embedding_id?: string;
+  // Memory-extraction metadata (present on intelligently-stored memories)
+  memory_type?: MemoryType;
+  importance?: number;
+  summary?: string;
   content: Record<string, unknown>;
 }
 
 export interface BlobMetadata {
   blob_id: string;
   type: MemoryBlobType;
+  workspace_id: string;
   session_id: string;
   created_at: string;
   tags: string[];
+  memory_type?: MemoryType;
+  importance?: number;
+  summary?: string;
   preview?: string;
 }
 
@@ -36,6 +58,10 @@ export interface VectorEntry {
   created_at: string;
   session_id?: string;
   confidence?: number;
+  workspace_id?: string;
+  memory_type?: MemoryType;
+  importance?: number;
+  summary?: string;
 }
 
 export interface VectorIndex {
@@ -103,14 +129,34 @@ export interface SynthesisDocument {
 export interface MemoryRetrieval {
   blob_id: string;
   session_id: string;
+  workspace_id: string;
   title: string;
   cosine_score: number;
   confidence: number;
+  importance?: number;
+  memory_type?: MemoryType;
   reason: string;
 }
 
+// Structured output of the memory-extraction / decision step.
+export interface MemoryDecision {
+  should_store: boolean;
+  memory_type?: MemoryType;
+  importance?: number;       // 0..1
+  summary?: string;
+  reason: string;
+  tags?: string[];
+}
+
+// What kind of reply the engine produced.
+export type ReplyMode = 'casual' | 'research';
+
+export interface CasualAnswer {
+  text: string;
+}
+
 export type AgentEvent =
-  | { event: 'session_start';      session_id: string }
+  | { event: 'session_start';      session_id: string; workspace_id: string }
   | { event: 'memory_loaded';      count: number; session_id: string }
   | { event: 'memory_empty';       session_id: string }
   | { event: 'memory_selected';    retrievals: MemoryRetrieval[] }
@@ -118,10 +164,13 @@ export type AgentEvent =
   | { event: 'research_complete';  confidence: number; findings_count: number }
   | { event: 'synthesis_start' }
   | { event: 'synthesis_complete'; confidence: number; confidence_delta: number; themes: string[] }
+  | { event: 'memory_decision';    decision: MemoryDecision }
   | { event: 'memory_committing' }
-  | { event: 'memory_committed';   blob_id: string; type: string }
+  | { event: 'memory_committed';   blob_id: string; type: string; memory_type?: MemoryType; importance?: number }
+  | { event: 'memory_skipped';     reason: string }
   | { event: 'walrus_warning';     message: string }
-  | { event: 'session_complete';   summary: string; duration_ms: number; blob_id?: string; synthesis?: SynthesisDocument }
+  | { event: 'casual_reply';       text: string }
+  | { event: 'session_complete';   summary: string; duration_ms: number; blob_id?: string; synthesis?: SynthesisDocument; reply_mode: ReplyMode; casual?: CasualAnswer }
   | { event: 'error';              message: string; recoverable: boolean };
 
 // ─── Session ─────────────────────────────────────────────────────────────────
@@ -144,6 +193,7 @@ export interface AgentRequestBody {
   query: string;
   session_id: string;
   user_id: string;
+  workspace_id?: string;
 }
 
 export interface MemoryResponseItem {

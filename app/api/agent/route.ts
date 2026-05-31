@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     return new Response('Invalid JSON', { status: 400 });
   }
 
-  const { query, session_id, user_id } = body;
+  const { query, session_id, user_id, workspace_id } = body;
   if (!query || !session_id || !user_id) {
     return new Response('Missing required fields: query, session_id, user_id', { status: 400 });
   }
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
       };
 
       try {
-        await runOrchestrator({ query, session_id, user_id, emit });
+        await runOrchestrator({ query, session_id, user_id, workspace_id, emit });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Orchestration failed';
         emit({ event: 'error', message, recoverable: false });

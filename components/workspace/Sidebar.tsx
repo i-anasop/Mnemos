@@ -5,6 +5,8 @@ import Icon, { type IconName } from '@/components/ui/Icon';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 import { MnemosLogo } from '@/components/ui/Logo';
 import { SuiDroplet, WalToken } from '@/components/ui/Brand';
+import SidebarMemory from '@/components/workspace/SidebarMemory';
+import type { BlobMetadata } from '@/types';
 
 interface SidebarProps {
   open: boolean;
@@ -12,6 +14,13 @@ interface SidebarProps {
   onNew: () => void;
   onOpenMemory: () => void;
   memoryCount: number;
+  // memory panel (list only — detail renders in the main area)
+  showMemory: boolean;
+  onCloseMemory: () => void;
+  blobs: BlobMetadata[];
+  selectedBlobId: string | null;
+  onSelectBlob: (id: string) => void;
+  isBlobsLoading: boolean;
 }
 
 function NavItem({
@@ -31,22 +40,28 @@ function NavItem({
   );
 }
 
-export default function Sidebar({ open, onToggle, onNew, onOpenMemory, memoryCount }: SidebarProps) {
+export default function Sidebar({
+  open, onToggle, onNew, onOpenMemory, memoryCount,
+  showMemory, onCloseMemory, blobs, selectedBlobId, onSelectBlob, isBlobsLoading,
+}: SidebarProps) {
+  // When showing memory, force the sidebar to its expanded width.
+  const expanded = open || showMemory;
+
   return (
     <>
       {/* mobile overlay */}
-      {open && (
-        <div className="md:hidden fixed inset-0 z-30 bg-[#0e0e0e]/30 backdrop-blur-[2px]" onClick={onToggle} />
+      {expanded && (
+        <div className="md:hidden fixed inset-0 z-30 bg-[#0e0e0e]/30 backdrop-blur-[2px]" onClick={showMemory ? onCloseMemory : onToggle} />
       )}
 
       <aside
         className={`fixed md:static z-40 h-full flex-shrink-0 bg-[var(--paper)] border-r border-[var(--line)] flex flex-col transition-[width,transform] duration-300 ${
-          open ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
-        } ${open ? 'w-64' : 'md:w-[68px]'}`}
+          expanded ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        } ${expanded ? 'w-72' : 'md:w-[68px]'}`}
       >
         {/* brand + collapse */}
-        <div className={`flex items-center h-[60px] px-3 ${open ? 'justify-between' : 'md:justify-center'}`}>
-          <Link href="/" className={`flex items-center gap-2.5 ${open ? '' : 'md:hidden'}`}>
+        <div className={`flex items-center h-[60px] px-3 flex-shrink-0 ${expanded ? 'justify-between' : 'md:justify-center'}`}>
+          <Link href="/" className={`flex items-center gap-2.5 ${expanded ? '' : 'md:hidden'}`}>
             <MnemosLogo size={28} />
             <span className="text-lg font-bold tracking-tight">Mnemos</span>
           </Link>
@@ -59,25 +74,47 @@ export default function Sidebar({ open, onToggle, onNew, onOpenMemory, memoryCou
           </button>
         </div>
 
+        {/* active workspace */}
+        {expanded && (
+          <div className="px-3.5 mt-1 mb-1 flex items-center gap-2 flex-shrink-0">
+            <span className="w-1.5 h-1.5 rounded-full grad-bg" />
+            <span className="text-[11px] font-semibold tracking-wide text-[var(--muted)]">Mnemos Demo</span>
+            <span className="text-[10px] text-[var(--faint)] ml-auto">workspace</span>
+          </div>
+        )}
+
         {/* primary actions */}
-        <div className="px-2.5 mt-2 space-y-1">
+        <div className="px-2.5 mt-1.5 space-y-1 flex-shrink-0">
           <button
             onClick={onNew}
             className="group w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-[var(--ink)] text-[var(--paper)] hover:opacity-90 transition-opacity"
           >
             <Icon name="bolt" size={18} className="flex-shrink-0" />
-            {open && <span className="text-sm font-semibold">New session</span>}
+            {expanded && <span className="text-sm font-semibold">New session</span>}
           </button>
         </div>
 
-        <nav className="px-2.5 mt-3 space-y-0.5">
-          {open ? (
-            <NavItem icon="layers" label="Memory on Walrus" onClick={onOpenMemory} badge={memoryCount} />
+        {/* Memory — expands inline below this row */}
+        <div className="px-2.5 mt-3 flex flex-col min-h-0 flex-1">
+          {expanded ? (
+            <button
+              onClick={showMemory ? onCloseMemory : onOpenMemory}
+              className={`group w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors flex-shrink-0 ${
+                showMemory ? 'bg-[var(--card)] text-[var(--ink)]' : 'text-[var(--ink)] hover:bg-[var(--card)]'
+              }`}
+            >
+              <Icon name="layers" size={18} className={showMemory ? 'text-[#6366f1]' : 'text-[var(--muted)] group-hover:text-[var(--ink)] transition-colors flex-shrink-0'} />
+              <span className="text-sm font-medium flex-1 text-left">Memory on Walrus</span>
+              {memoryCount > 0 && !showMemory && (
+                <span className="px-1.5 py-0.5 rounded-full bg-[var(--ink)] text-[var(--paper)] text-[10px] leading-none">{memoryCount}</span>
+              )}
+              <Icon name="arrow-right" size={14} className={`text-[var(--faint)] transition-transform ${showMemory ? 'rotate-90' : ''}`} />
+            </button>
           ) : (
             <button
               onClick={onOpenMemory}
               aria-label="Memory on Walrus"
-              className="group w-full flex items-center justify-center py-2.5 rounded-xl hover:bg-[var(--card)] transition-colors relative"
+              className="group w-full flex items-center justify-center py-2.5 rounded-xl hover:bg-[var(--card)] transition-colors relative flex-shrink-0"
             >
               <Icon name="layers" size={18} className="text-[var(--muted)] group-hover:text-[var(--ink)]" />
               {memoryCount > 0 && (
@@ -85,25 +122,51 @@ export default function Sidebar({ open, onToggle, onNew, onOpenMemory, memoryCou
               )}
             </button>
           )}
-        </nav>
 
-        {/* footer — Powered by (visual) + theme toggle */}
-        <div className="mt-auto p-2.5 border-t border-[var(--line)]">
-          {open ? (
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex flex-col gap-1.5 min-w-0">
-                <span className="text-[10px] font-semibold tracking-widest uppercase text-[var(--faint)]">Powered by</span>
-                <div className="flex items-center gap-2">
-                  <span className="w-7 h-7 rounded-lg bg-[var(--card)] border border-[var(--line)] flex items-center justify-center" title="Walrus"><WalToken size={16} variant="color" /></span>
-                  <span className="w-7 h-7 rounded-lg bg-[var(--card)] border border-[var(--line)] flex items-center justify-center" title="Sui"><SuiDroplet size={15} variant="blue" /></span>
-                  <span className="w-7 h-7 rounded-lg bg-[var(--card)] border border-[var(--line)] flex items-center justify-center text-[#a855f7]" title="Voyage"><Icon name="brain" size={15} /></span>
+          {/* inline expanding memory list (list only — detail opens in main area) */}
+          {expanded && showMemory && (
+            <div className="mt-2 flex-1 min-h-0 overflow-y-auto pr-0.5 pb-2">
+              <SidebarMemory
+                blobs={blobs}
+                selectedBlobId={selectedBlobId}
+                onSelect={onSelectBlob}
+                isLoading={isBlobsLoading}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* footer — live status card + theme toggle */}
+        <div className="p-2.5 flex-shrink-0">
+          {expanded ? (
+            <div className="rounded-2xl border border-[var(--line)] overflow-hidden">
+              {/* status header */}
+              <div className="relative flex items-center gap-2.5 px-3.5 py-3 bg-gradient-to-br from-[#06b6d4]/12 via-[#6366f1]/10 to-[#a855f7]/12">
+                <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-[#22c55e] opacity-60 animate-ping" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#22c55e]" />
+                </span>
+                <div className="leading-tight min-w-0">
+                  <p className="text-[13px] font-semibold text-[var(--ink)]">Memory live</p>
+                  <p className="text-[11px] text-[var(--muted)] truncate">on Walrus testnet</p>
                 </div>
+                <WalToken size={20} variant="color" className="ml-auto flex-shrink-0" />
               </div>
-              <ThemeToggle />
+              {/* ecosystem + toggle */}
+              <div className="flex items-center justify-between px-3 py-2 border-t border-[var(--line)] bg-[var(--card)]">
+                <div className="flex items-center gap-2.5">
+                  <span title="Walrus"><WalToken size={16} variant="color" /></span>
+                  <span title="Sui"><SuiDroplet size={15} variant="blue" /></span>
+                </div>
+                <ThemeToggle />
+              </div>
             </div>
           ) : (
-            <div className="hidden md:flex flex-col items-center gap-2">
-              <span className="w-7 h-7 rounded-lg bg-[var(--card)] border border-[var(--line)] flex items-center justify-center" title="Powered by Walrus"><WalToken size={16} variant="color" /></span>
+            <div className="hidden md:flex flex-col items-center gap-2.5 py-1">
+              <span className="relative flex h-2.5 w-2.5" title="Memory live on Walrus">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-[#22c55e] opacity-60 animate-ping" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#22c55e]" />
+              </span>
               <ThemeToggle />
             </div>
           )}

@@ -2,7 +2,8 @@ import { walrusStore, walrusFetchJSON } from './client';
 import { embed } from '@/lib/embeddings/voyage';
 import { searchVectors, addToIndex, emptyIndex } from '@/lib/embeddings/search';
 import type { ScoredEntry } from '@/lib/embeddings/search';
-import type { MemoryBlob, MemoryBlobType, VectorIndex, BlobMetadata } from '@/types';
+import type { MemoryBlob, MemoryBlobType, MemoryType, VectorIndex, BlobMetadata } from '@/types';
+import { DEFAULT_WORKSPACE_ID } from '@/lib/workspace';
 import { promises as fs } from 'fs';
 import path from 'path';
 
@@ -70,35 +71,42 @@ export async function storeMemory(params: {
   tags: string[];
   session_id: string;
   user_id: string;
+  workspace_id?: string;
+  // Memory-extraction metadata (what makes this a curated artifact, not raw chat)
+  memory_type?: MemoryType;
+  importance?: number;
+  summary?: string;
 }): Promise<string> {
-  const { content, type, tags, session_id, user_id } = params;
+  const { content, type, tags, session_id, user_id, memory_type, importance, summary } = params;
+  const workspace_id = params.workspace_id ?? DEFAULT_WORKSPACE_ID;
 
   const blob: MemoryBlob = {
     schema_version: '1.0',
     type,
+    workspace_id,
     session_id,
     user_id,
     created_at: new Date().toISOString(),
     tags,
+    memory_type,
+    importance,
+    summary,
     content,
   };
 
-  // Embed for semantic retrieval
-  const embeddingText = JSON.stringify(content).slice(0, 4000);
+  // Embed for semantic retrieval. Prefer the human summary (cleaner signal) and
+  // fall back to the raw content payload. The vector is persisted inside the
+  // VectorIndex (below), so we do NOT store a separate embedding blob — that
+  // was an unused extra Walrus round-trip on every save.
+  const embeddingText = (summary ? `${summary}\n` : '') + JSON.stringify(content).slice(0, 4000);
   const vector = await embed(embeddingText);
-
-  // Store embedding vector blob
-  const vectorBytes = new Float32Array(vector);
-  const embeddingBlobId = await walrusStore(new Uint8Array(vectorBytes.buffer));
-  blob.embedding_id = embeddingBlobId;
 
   // Store memory blob
   const blobId = await walrusStore(JSON.stringify(blob));
 
-  // Extract confidence from content if present (synthesis_document and research_report both have it)
-  const confidence = typeof content.confidence === 'number' ? content.confidence : undefined;
+  const confidence = typeof content.confidence === 'number' ? content.confidence : importance;
 
-  // Update and persist vector index — store session_id and confidence for richer retrieval
+  // Update and persist vector index with full retrieval metadata.
   const { index } = await loadIndex(user_id);
   const updated = addToIndex(index, {
     blob_id: blobId,
@@ -108,6 +116,10 @@ export async function storeMemory(params: {
     created_at: blob.created_at,
     session_id,
     confidence,
+    workspace_id,
+    memory_type,
+    importance,
+    summary,
   });
   await saveIndex(user_id, updated);
 
@@ -122,14 +134,18 @@ export async function retrieveMemory(params: {
   query: string;
   user_id: string;
   top_k?: number;
+  workspace_id?: string;
+  min_relevance?: number;
 }): Promise<{ blobs: MemoryBlob[]; blobIds: string[]; scored: ScoredEntry[] }> {
   const { query, user_id, top_k = 5 } = params;
+  const workspace_id = params.workspace_id ?? DEFAULT_WORKSPACE_ID;
+  const minRelevance = params.min_relevance ?? MIN_RELEVANCE;
 
   const { index } = await loadIndex(user_id);
   if (index.entries.length === 0) return { blobs: [], blobIds: [], scored: [] };
 
   const queryVector = await embed(query);
-  const nearest = searchVectors(index, queryVector, top_k, MIN_RELEVANCE);
+  const nearest = searchVectors(index, queryVector, top_k, minRelevance, workspace_id);
   if (nearest.length === 0) return { blobs: [], blobIds: [], scored: [] };
 
   const fetched = await Promise.all(
@@ -151,15 +167,22 @@ export async function retrieveMemory(params: {
   };
 }
 
-export async function getUserBlobMetadata(userId: string): Promise<BlobMetadata[]> {
+export async function getUserBlobMetadata(userId: string, workspaceId?: string): Promise<BlobMetadata[]> {
   const { index } = await loadIndex(userId);
-  return index.entries.map(entry => ({
-    blob_id: entry.blob_id,
-    type: entry.type,
-    session_id: entry.session_id ?? '',
-    created_at: entry.created_at,
-    tags: entry.tags,
-  }));
+  return index.entries
+    .filter(entry =>
+      !workspaceId || (entry.workspace_id ?? DEFAULT_WORKSPACE_ID) === workspaceId)
+    .map(entry => ({
+      blob_id: entry.blob_id,
+      type: entry.type,
+      workspace_id: entry.workspace_id ?? DEFAULT_WORKSPACE_ID,
+      session_id: entry.session_id ?? '',
+      created_at: entry.created_at,
+      tags: entry.tags,
+      memory_type: entry.memory_type,
+      importance: entry.importance,
+      summary: entry.summary,
+    }));
 }
 
 export async function fetchMemoryBlob(blobId: string): Promise<MemoryBlob> {

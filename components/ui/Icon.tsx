@@ -33,7 +33,9 @@ export type IconName =
   | 'mic'
   | 'waveform'
   | 'plus'
-  | 'globe';
+  | 'globe'
+  | 'thumbUp'
+  | 'thumbDown';
 
 interface IconProps {
   name: IconName;
@@ -180,6 +182,18 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+    </>
+  ),
+  thumbUp: (
+    <>
+      <path d="M7 10v11" />
+      <path d="M18 21H8a2 2 0 0 1-2-2v-8.5a1 1 0 0 1 .3-.7l5.4-5.4a1 1 0 0 1 1.5.2l.5.8a3 3 0 0 1 .4 2.2L13.5 10H19a2 2 0 0 1 2 2.3l-1 6a2 2 0 0 1-2 1.7Z" />
+    </>
+  ),
+  thumbDown: (
+    <>
+      <path d="M17 14V3" />
+      <path d="M6 3h10a2 2 0 0 1 2 2v8.5a1 1 0 0 1-.3.7l-5.4 5.4a1 1 0 0 1-1.5-.2l-.5-.8a3 3 0 0 1-.4-2.2L10.5 14H5a2 2 0 0 1-2-2.3l1-6A2 2 0 0 1 6 3Z" />
     </>
   ),
 };

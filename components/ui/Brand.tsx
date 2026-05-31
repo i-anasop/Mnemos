@@ -19,6 +19,19 @@ export function SuiDroplet({ size = 22, variant = 'blue', className = '' }: { si
   );
 }
 
+export function VoyageMark({ size = 22, className = '' }: { size?: number; className?: string }) {
+  return (
+    <img
+      src="/brand/voyage-mark.svg"
+      alt="Voyage AI"
+      width={size}
+      height={size}
+      className={className}
+      draggable={false}
+    />
+  );
+}
+
 export function WalrusLogotype({ height = 22, variant = 'black', className = '' }: { height?: number; variant?: 'black' | 'white'; className?: string }) {
   return (
     <img

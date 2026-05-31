@@ -1,7 +1,10 @@
 import { runResearcher } from './researcher';
 import { runSynthesizer } from './synthesizer';
+import { runConversationalReply } from './responder';
+import { triageMessage, decideMemory, decideMemoryFromMessage, keywordTags } from './memory-extractor';
 import { storeMemory, retrieveMemory } from '@/lib/walrus/memory';
 import type { ScoredEntry } from '@/lib/walrus/memory';
+import { DEFAULT_WORKSPACE_ID, getWorkspace } from '@/lib/workspace';
 import type { AgentEvent, MemoryBlob, MemoryRetrieval, ResearchReport, SynthesisDocument } from '@/types';
 
 export type Emitter = (event: AgentEvent) => void;
@@ -110,19 +113,111 @@ export async function runOrchestrator(params: {
   query: string;
   session_id: string;
   user_id: string;
+  workspace_id?: string;
   emit: Emitter;
-}): Promise<{ synthesis: SynthesisDocument; blob_id?: string }> {
+}): Promise<{ synthesis?: SynthesisDocument; blob_id?: string; casual?: string }> {
   const { query, session_id, user_id, emit } = params;
+  const workspace_id = params.workspace_id ?? DEFAULT_WORKSPACE_ID;
   const start = Date.now();
 
-  emit({ event: 'session_start', session_id });
+  emit({ event: 'session_start', session_id, workspace_id });
+  const workspaceLabel = getWorkspace(workspace_id).label;
 
-  // ── Phase 1: Retrieve prior memory ────────────────────────────────────────
+  const triage = triageMessage(query);
+
+  // ── Casual: greeting / acknowledgement → quick reply, no memory, no store ──
+  if (triage.mode === 'casual') {
+    const text = await runConversationalReply({ message: query, workspaceLabel });
+    emit({ event: 'casual_reply', text });
+    emit({ event: 'memory_skipped', reason: triage.reason });
+    emit({
+      event: 'session_complete',
+      summary: 'Casual reply.',
+      duration_ms: Date.now() - start,
+      reply_mode: 'casual',
+      casual: { text },
+    });
+    return { casual: text };
+  }
+
+  // ── Conversational: normal chat / meta / follow-up → memory-aware reply ────
+  if (triage.mode === 'conversational') {
+    let convoMemories: MemoryBlob[] = [];
+    try {
+      // Lower threshold for conversation: personal facts ("my name is…") match
+      // questions ("do you know my name?") only weakly in embedding space.
+      const { blobs, blobIds, scored } = await retrieveMemory({ query, user_id, top_k: 4, workspace_id, min_relevance: 0.22 });
+      if (blobs.length > 0) {
+        convoMemories = blobs;
+        emit({ event: 'memory_loaded', count: blobs.length, session_id });
+        const retrievals: MemoryRetrieval[] = blobs.map((blob, i) => ({
+          blob_id: blobIds[i],
+          session_id: blob.session_id,
+          workspace_id: blob.workspace_id ?? workspace_id,
+          title: extractBlobTitle(blob),
+          cosine_score: scored[i].score,
+          confidence: (blob.content as { confidence?: number }).confidence ?? blob.importance ?? 0,
+          importance: blob.importance,
+          memory_type: blob.memory_type,
+          reason: buildRetrievalReason(scored[i].score, blob),
+        }));
+        emit({ event: 'memory_selected', retrievals });
+      } else {
+        emit({ event: 'memory_empty', session_id });
+      }
+    } catch {
+      emit({ event: 'walrus_warning', message: 'Memory retrieval failed — replying without it' });
+    }
+
+    const text = await runConversationalReply({ message: query, memories: convoMemories, workspaceLabel });
+    emit({ event: 'casual_reply', text });
+
+    // Surface the answer immediately; assess + store the user's message after.
+    emit({
+      event: 'session_complete',
+      summary: 'Conversational reply.',
+      duration_ms: Date.now() - start,
+      reply_mode: 'casual',
+      casual: { text },
+    });
+
+    // A conversational turn can still carry durable knowledge (decisions,
+    // preferences, "my name is…"). Judge the message itself and store if so.
+    const msgDecision = await decideMemoryFromMessage(query);
+    emit({ event: 'memory_decision', decision: msgDecision });
+    let convo_blob_id: string | undefined;
+    if (msgDecision.should_store) {
+      emit({ event: 'memory_committing' });
+      try {
+        convo_blob_id = await storeMemory({
+          content: { statement: query, summary: msgDecision.summary, confidence: msgDecision.importance },
+          type: 'session_snapshot',
+          tags: msgDecision.tags && msgDecision.tags.length > 0 ? msgDecision.tags : keywordTags(query),
+          session_id,
+          user_id,
+          workspace_id,
+          memory_type: msgDecision.memory_type,
+          importance: msgDecision.importance,
+          summary: msgDecision.summary,
+        });
+        emit({ event: 'memory_committed', blob_id: convo_blob_id, type: 'session_snapshot', memory_type: msgDecision.memory_type, importance: msgDecision.importance });
+      } catch (err) {
+        emit({ event: 'walrus_warning', message: `Memory commit failed: ${err instanceof Error ? err.message : 'error'}` });
+      }
+    } else {
+      emit({ event: 'memory_skipped', reason: msgDecision.reason });
+    }
+
+    return { casual: text, blob_id: convo_blob_id };
+  }
+
+  // ── Research: full multi-agent pipeline ───────────────────────────────────
+  // ── Phase 1: Retrieve prior memory (scoped to the active workspace) ───────
   let memoryBlobs: MemoryBlob[] = [];
   let memoryScoredEntries: ScoredEntry[] = [];
 
   try {
-    const { blobs, blobIds, scored } = await retrieveMemory({ query, user_id, top_k: 5 });
+    const { blobs, blobIds, scored } = await retrieveMemory({ query, user_id, top_k: 5, workspace_id });
 
     if (blobs.length > 0) {
       memoryBlobs = blobs;
@@ -130,13 +225,15 @@ export async function runOrchestrator(params: {
 
       emit({ event: 'memory_loaded', count: blobs.length, session_id });
 
-      // Emit per-blob retrieval explanation (P3)
       const retrievals: MemoryRetrieval[] = blobs.map((blob, i) => ({
         blob_id: blobIds[i],
         session_id: blob.session_id,
+        workspace_id: blob.workspace_id ?? workspace_id,
         title: extractBlobTitle(blob),
         cosine_score: memoryScoredEntries[i].score,
-        confidence: (blob.content as { confidence?: number }).confidence ?? 0,
+        confidence: (blob.content as { confidence?: number }).confidence ?? blob.importance ?? 0,
+        importance: blob.importance,
+        memory_type: blob.memory_type,
         reason: buildRetrievalReason(memoryScoredEntries[i].score, blob),
       }));
       emit({ event: 'memory_selected', retrievals });
@@ -150,7 +247,6 @@ export async function runOrchestrator(params: {
   // ── Phase 2: Research ─────────────────────────────────────────────────────
   emit({ event: 'research_start', question: query });
 
-  // Build structured context from retrieved blobs (P1 fix)
   const memoryContext =
     memoryBlobs.length > 0
       ? memoryBlobs.slice(0, 3).map(extractMemoryContext).join('\n\n---\n\n')
@@ -172,9 +268,6 @@ export async function runOrchestrator(params: {
   // ── Phase 3: Synthesize ───────────────────────────────────────────────────
   emit({ event: 'synthesis_start' });
 
-  // Pass memory blobs as their actual content — the synthesizer uses them as
-  // JSON context for comparison, not as typed ResearchReport structs.
-  // Cap to the top 3 to keep the synthesis prompt within rate-limit budgets.
   const memoryReports = memoryBlobs.slice(0, 3).map(b => b.content as unknown as ResearchReport);
 
   const synthesis = await runSynthesizer({
@@ -191,32 +284,53 @@ export async function runOrchestrator(params: {
     themes: synthesis.themes.map(t => t.label),
   });
 
-  // ── Phase 4: Persist to Walrus ────────────────────────────────────────────
-  let blob_id: string | undefined;
-  emit({ event: 'memory_committing' });
+  // ── Phase 4: Memory decision — is this worth remembering? ─────────────────
+  const decision = await decideMemory({ query, synthesis });
+  emit({ event: 'memory_decision', decision });
 
-  try {
-    blob_id = await storeMemory({
-      content: synthesis as unknown as Record<string, unknown>,
-      type: 'synthesis_document',
-      tags: [query.split(' ').slice(0, 3).join('-'), session_id],
-      session_id,
-      user_id,
-    });
-    emit({ event: 'memory_committed', blob_id, type: 'synthesis_document' });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    emit({ event: 'walrus_warning', message: `Memory commit failed: ${msg}` });
-  }
-
+  // Show the answer to the user *now*. Storage to Walrus (a few network
+  // round-trips) then happens after, so the user never waits on it. The UI
+  // renders the answer on session_complete and patches the Walrus receipt in
+  // when memory_committed arrives.
   const duration_ms = Date.now() - start;
   emit({
     event: 'session_complete',
     summary: `Synthesized ${synthesis.themes.length} themes from ${report.findings.length} findings. Confidence: ${(synthesis.confidence * 100).toFixed(0)}%.`,
     duration_ms,
-    blob_id,
     synthesis,
+    reply_mode: 'research',
   });
+
+  // ── Phase 5: Persist (after the answer is already on screen) ──────────────
+  let blob_id: string | undefined;
+  if (decision.should_store) {
+    emit({ event: 'memory_committing' });
+    try {
+      blob_id = await storeMemory({
+        content: synthesis as unknown as Record<string, unknown>,
+        type: 'synthesis_document',
+        tags: decision.tags && decision.tags.length > 0 ? decision.tags : keywordTags(query),
+        session_id,
+        user_id,
+        workspace_id,
+        memory_type: decision.memory_type,
+        importance: decision.importance,
+        summary: decision.summary,
+      });
+      emit({
+        event: 'memory_committed',
+        blob_id,
+        type: 'synthesis_document',
+        memory_type: decision.memory_type,
+        importance: decision.importance,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      emit({ event: 'walrus_warning', message: `Memory commit failed: ${msg}` });
+    }
+  } else {
+    emit({ event: 'memory_skipped', reason: decision.reason });
+  }
 
   return { synthesis, blob_id };
 }

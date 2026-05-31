@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import Icon from '@/components/ui/Icon';
 
 interface QueryInputProps {
@@ -16,14 +16,51 @@ const PLACEHOLDER_QUERIES = [
   'Analyze the implications of decentralized AI memory systems',
 ];
 
+/* Minimal typing for the Web Speech API (not in lib.dom by default). */
+interface SpeechRecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  start: () => void;
+  stop: () => void;
+  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+}
+
 export default function QueryInput({ onSubmit, isRunning, large = false }: QueryInputProps) {
   const [query, setQuery] = useState('');
   const [placeholder, setPlaceholder] = useState(PLACEHOLDER_QUERIES[0]);
+  const [listening, setListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
   useEffect(() => {
     const idx = Math.floor(Math.random() * PLACEHOLDER_QUERIES.length);
     setPlaceholder(PLACEHOLDER_QUERIES[idx]);
+
+    const W = window as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition;
+    if (Ctor) {
+      setVoiceSupported(true);
+      const rec = new Ctor();
+      rec.lang = 'en-US';
+      rec.interimResults = true;
+      rec.continuous = false;
+      rec.onresult = (e) => {
+        let text = '';
+        for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
+        setQuery(text);
+      };
+      rec.onend = () => setListening(false);
+      rec.onerror = () => setListening(false);
+      recognitionRef.current = rec;
+    }
   }, []);
 
   const handleSubmit = () => {
@@ -40,6 +77,32 @@ export default function QueryInput({ onSubmit, isRunning, large = false }: Query
     }
   };
 
+  const toggleVoice = useCallback(() => {
+    const rec = recognitionRef.current;
+    if (!rec) return;
+    if (listening) {
+      rec.stop();
+      setListening(false);
+    } else {
+      try {
+        rec.start();
+        setListening(true);
+        textareaRef.current?.focus();
+      } catch {
+        setListening(false);
+      }
+    }
+  }, [listening]);
+
+  const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const names = Array.from(e.target.files ?? []).map((f) => f.name);
+    if (names.length) {
+      setQuery((q) => `${q}${q ? '\n' : ''}Referencing: ${names.join(', ')}. `);
+      textareaRef.current?.focus();
+    }
+    e.target.value = '';
+  };
+
   // Auto-resize textarea
   useEffect(() => {
     const ta = textareaRef.current;
@@ -50,31 +113,34 @@ export default function QueryInput({ onSubmit, isRunning, large = false }: Query
 
   return (
     <div
-      className={`bg-[var(--card)] border border-[var(--line)] rounded-[1.75rem] shadow-[0_10px_36px_-16px_rgba(0,0,0,0.22)] focus-within:border-[var(--muted)] transition-colors ${
-        large ? 'px-5 pt-5 pb-3' : 'px-4 pt-4 pb-2.5'
-      }`}
+      className={`bg-[var(--card)] border rounded-[1.75rem] shadow-[0_10px_36px_-16px_rgba(0,0,0,0.22)] transition-colors flex flex-col ${
+        listening ? 'border-[#6366f1]' : 'border-[var(--line)] focus-within:border-[var(--muted)]'
+      } ${large ? 'px-5 pt-5 pb-3 min-h-[150px]' : 'px-4 pt-4 pb-2.5'}`}
     >
       <textarea
         ref={textareaRef}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder={placeholder}
+        placeholder={listening ? 'Listening…' : large ? 'How can Mnemos help you today?' : placeholder}
         disabled={isRunning}
         rows={large ? 2 : 1}
         aria-label="Research query"
         className={`w-full bg-transparent text-[var(--ink)] placeholder-[var(--faint)] resize-none outline-none leading-relaxed disabled:opacity-50 ${
-          large ? 'text-[17px]' : 'text-[15px]'
+          large ? 'text-[17px] flex-1' : 'text-[15px]'
         }`}
       />
 
-      <div className="flex items-center justify-between mt-2">
+      <input ref={fileRef} type="file" multiple className="hidden" onChange={handleFiles} />
+
+      <div className={`flex items-center justify-between ${large ? 'mt-auto pt-2' : 'mt-2'}`}>
         {/* left tools */}
         <div className="flex items-center gap-1">
           <button
             type="button"
-            aria-label="Attach"
-            title="Attach"
+            onClick={() => fileRef.current?.click()}
+            aria-label="Attach a file"
+            title="Attach a file"
             className="w-9 h-9 rounded-full flex items-center justify-center text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--paper)] transition-colors"
           >
             <Icon name="plus" size={19} />
@@ -93,24 +159,21 @@ export default function QueryInput({ onSubmit, isRunning, large = false }: Query
               Thinking…
             </span>
           ) : (
-            <>
+            voiceSupported && (
               <button
                 type="button"
-                aria-label="Dictate"
-                title="Dictate"
-                className="w-9 h-9 rounded-full flex items-center justify-center text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--paper)] transition-colors"
+                onClick={toggleVoice}
+                aria-label={listening ? 'Stop voice input' : 'Voice input'}
+                title={listening ? 'Stop' : 'Voice input'}
+                className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+                  listening
+                    ? 'bg-[#6366f1] text-white'
+                    : 'text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--paper)]'
+                }`}
               >
-                <Icon name="mic" size={18} />
+                <Icon name="mic" size={18} className={listening ? 'animate-pulse' : ''} />
               </button>
-              <button
-                type="button"
-                aria-label="Voice mode"
-                title="Voice mode"
-                className="w-9 h-9 rounded-full flex items-center justify-center text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--paper)] transition-colors"
-              >
-                <Icon name="waveform" size={18} />
-              </button>
-            </>
+            )
           )}
           <button
             onClick={handleSubmit}
