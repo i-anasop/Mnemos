@@ -166,6 +166,7 @@ export type AgentEvent =
   | { event: 'synthesis_complete'; confidence: number; confidence_delta: number; themes: string[] }
   | { event: 'memory_decision';    decision: MemoryDecision }
   | { event: 'memory_committing' }
+  | { event: 'walrus_retrying';    attempt: number }
   | { event: 'memory_committed';   blob_id: string; type: string; memory_type?: MemoryType; importance?: number }
   | { event: 'memory_skipped';     reason: string }
   | { event: 'walrus_warning';     message: string }

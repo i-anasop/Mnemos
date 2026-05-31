@@ -9,6 +9,7 @@ import SuggestionChips from '@/components/workspace/SuggestionChips';
 import MemoryDetail from '@/components/workspace/MemoryDetail';
 import TurnView, { type Turn } from '@/components/workspace/TurnView';
 import { MnemosLogo } from '@/components/ui/Logo';
+import ThemeToggle from '@/components/ui/ThemeToggle';
 import type { AgentEvent, BlobMetadata, SynthesisDocument } from '@/types';
 
 // Stable demo user ID — in production this comes from the connected Sui wallet
@@ -33,8 +34,15 @@ export default function WorkspacePage() {
   const [blobDetail, setBlobDetail] = useState<BlobDetail | null>(null);
   const [isBlobsLoading, setIsBlobsLoading] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const feedBottomRef = useRef<HTMLDivElement>(null);
+
+  // Open the sidebar by default on desktop; keep it closed (off-canvas) on phones.
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches) {
+      setIsSidebarOpen(true);
+    }
+  }, []);
 
   const refreshBlobs = useCallback(async () => {
     setIsBlobsLoading(true);
@@ -62,8 +70,16 @@ export default function WorkspacePage() {
     feedBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [turns]);
 
+  // On phones the sidebar is an overlay — close it after an action.
+  const closeSidebarOnMobile = useCallback(() => {
+    if (typeof window !== 'undefined' && !window.matchMedia('(min-width: 768px)').matches) {
+      setIsSidebarOpen(false);
+    }
+  }, []);
+
   const handleBlobSelect = useCallback(async (blobId: string) => {
     setSelectedBlobId(blobId);
+    closeSidebarOnMobile();
     try {
       const res = await fetch('/api/memory', {
         method: 'POST',
@@ -82,7 +98,7 @@ export default function WorkspacePage() {
     } catch {
       setBlobDetail({ blob_id: blobId });
     }
-  }, []);
+  }, [closeSidebarOnMobile]);
 
   const handleBackToList = useCallback(() => {
     setSelectedBlobId(null);
@@ -96,6 +112,7 @@ export default function WorkspacePage() {
 
   const handleQuery = useCallback(async (query: string) => {
     if (isRunning) return;
+    closeSidebarOnMobile();
 
     const sessionId = uuidv4();
     const turnId = sessionId;
@@ -173,12 +190,12 @@ export default function WorkspacePage() {
     } finally {
       setIsRunning(false);
     }
-  }, [isRunning, refreshBlobs]);
+  }, [isRunning, refreshBlobs, closeSidebarOnMobile]);
 
   const hasActivity = turns.length > 0;
 
   return (
-    <div className="h-screen flex bg-[var(--paper)] text-[var(--ink)] overflow-hidden">
+    <div className="h-[100svh] flex bg-[var(--paper)] text-[var(--ink)] overflow-hidden">
       <Sidebar
         open={isSidebarOpen}
         onToggle={() => setIsSidebarOpen(o => !o)}
@@ -196,11 +213,22 @@ export default function WorkspacePage() {
       {/* ─── Main column ─────────────────────────────────────────────────── */}
       <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
         {/* slim mobile top strip */}
-        <div className="md:hidden flex items-center gap-2 px-4 py-3 border-b border-[var(--line)] flex-shrink-0">
+        <div className="md:hidden flex items-center gap-2 px-3 py-2.5 border-b border-[var(--line)] flex-shrink-0 bg-[var(--paper)]/90 backdrop-blur-md">
           <button onClick={() => setIsSidebarOpen(true)} aria-label="Open menu" className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--muted)] hover:bg-[var(--card)]">
             <Icon name="layers" size={18} />
           </button>
-          <span className="text-base font-bold tracking-tight">Mnemos</span>
+          <span className="flex items-center gap-2 font-bold tracking-tight">
+            <MnemosLogo size={22} />
+            Mnemos
+          </span>
+          <div className="ml-auto flex items-center gap-1">
+            {hasActivity && (
+              <button onClick={handleNew} aria-label="New session" className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--muted)] hover:bg-[var(--card)]">
+                <Icon name="bolt" size={18} />
+              </button>
+            )}
+            <ThemeToggle />
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -211,11 +239,11 @@ export default function WorkspacePage() {
             </div>
           ) : !hasActivity ? (
             /* Empty state — wide centered greeting + big input */
-            <div className="max-w-3xl mx-auto px-4 sm:px-6 w-full min-h-[78vh] flex flex-col items-center justify-center">
+            <div className="max-w-3xl mx-auto px-4 sm:px-6 w-full min-h-[72svh] flex flex-col items-center justify-center">
               <span className="mb-5 w-14 h-14 rounded-2xl bg-[var(--card)] border border-[var(--line)] flex items-center justify-center anim-float">
                 <MnemosLogo size={30} />
               </span>
-              <h2 className="text-[2rem] sm:text-[2.6rem] font-semibold tracking-tight mb-9 text-center">
+              <h2 className="text-[1.7rem] sm:text-[2.6rem] font-semibold tracking-tight mb-7 sm:mb-9 text-center leading-tight">
                 What should Mnemos <span className="grad-text">remember</span>?
               </h2>
 

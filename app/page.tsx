@@ -13,16 +13,16 @@ function StepCard({
 }: { n: string; title: string; kicker: string; fill: string; children: React.ReactNode }) {
   return (
     <div
-      className="force-ink group relative border-2 border-[#0e0e0e] rounded-[2rem] p-8 sm:p-9 min-h-[360px] flex flex-col overflow-hidden shadow-card transition-all duration-300 hover:-translate-y-1.5 hover:shadow-[0_28px_60px_-22px_rgba(14,14,14,0.4)]"
+      className="force-ink group relative border-2 border-[#0e0e0e] rounded-[1.75rem] sm:rounded-[2rem] p-6 sm:p-9 min-h-[200px] sm:min-h-[360px] flex flex-col overflow-hidden shadow-card transition-all duration-300 hover:-translate-y-1.5 hover:shadow-[0_28px_60px_-22px_rgba(14,14,14,0.4)]"
       style={{ background: fill }}
     >
       <div className="flex items-center justify-between">
         <span className="text-sm font-mono font-bold text-[#0e0e0e]/40">{n}</span>
         <span className="text-xs font-bold tracking-widest uppercase text-[#0e0e0e]/45">Step</span>
       </div>
-      <h3 className="display text-[3.4rem] sm:text-[3.8rem] mt-6 font-bold text-[#0e0e0e]">{title}</h3>
-      <p className="text-base font-medium text-[#3a3a35] mt-2.5 max-w-[15rem]">{kicker}</p>
-      <div className="mt-auto pt-8 flex justify-end items-end">{children}</div>
+      <h3 className="display text-[2.5rem] sm:text-[3.8rem] mt-4 sm:mt-6 font-bold text-[#0e0e0e]">{title}</h3>
+      <p className="text-[15px] sm:text-base font-medium text-[#3a3a35] mt-2 max-w-[15rem]">{kicker}</p>
+      <div className="mt-auto pt-6 sm:pt-8 flex justify-end items-end">{children}</div>
     </div>
   );
 }
@@ -68,10 +68,10 @@ export default function LandingPage() {
 
       <SectionNav />
 
-      {/* ─── Snap-scroll container ────────────────────────────────────────── */}
-      <main className="h-screen overflow-y-scroll snap-y snap-mandatory bg-[var(--paper)] text-[var(--ink)]">
+      {/* ─── Snap-scroll container (dvh + mandatory on desktop only) ──────── */}
+      <main className="snap-main h-[100svh] overflow-y-scroll snap-y bg-[var(--paper)] text-[var(--ink)]">
         {/* ── Section 1 — Hero ── */}
-        <section id="hero" className="snap-start snap-always relative h-screen flex flex-col items-center overflow-hidden px-6 sm:px-16 lg:px-28 pt-28 sm:pt-32">
+        <section id="hero" className="snap-start snap-always relative min-h-[100svh] flex flex-col items-center overflow-hidden px-6 sm:px-16 lg:px-28 pt-24 sm:pt-32">
           <div className="bloom bloom-violet w-[560px] h-[560px] -top-24 -left-24" />
           <div className="bloom bloom-teal w-[660px] h-[660px] -top-32 right-[-16rem]" />
 
@@ -81,22 +81,22 @@ export default function LandingPage() {
               Persistent memory for AI agents
             </div>
 
-            <h1 className="display text-[3.1rem] leading-[0.9] sm:text-[5.6rem] font-bold mb-4">
+            <h1 className="display text-[2.9rem] leading-[0.92] sm:text-[5.6rem] font-bold mb-4">
               AI memory
               <br />
               <span className="grad-text">that survives.</span>
             </h1>
 
-            <p className="max-w-lg mx-auto text-base sm:text-xl font-medium text-[var(--muted)] mb-7">
+            <p className="max-w-lg mx-auto text-[15px] sm:text-xl font-medium text-[var(--muted)] mb-6 sm:mb-7">
               Durable, verifiable memory — powered by Walrus.
             </p>
 
-            <div className="flex flex-wrap items-center justify-center gap-3.5">
-              <Link href="/workspace" className="group pill pill-ink text-base font-semibold px-8 py-3.5">
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <Link href="/workspace" className="group pill pill-ink text-[15px] sm:text-base font-semibold px-7 sm:px-8 py-3.5">
                 Launch Engine
                 <Icon name="arrow-right" size={18} className="group-hover:translate-x-1 transition-transform" />
               </Link>
-              <a href="#proof" className="pill pill-ghost text-base font-semibold px-7 py-3.5">
+              <a href="#proof" className="pill pill-ghost text-[15px] sm:text-base font-semibold px-6 sm:px-7 py-3.5">
                 See Memory Proof
               </a>
             </div>
@@ -110,7 +110,7 @@ export default function LandingPage() {
               pose="primary"
               priority
               alt="Mnemos mascot"
-              className="relative z-10 w-auto h-[1080px] sm:h-[1420px] mask-fade-b drop-shadow-[0_24px_60px_rgba(99,102,241,0.28)]"
+              className="relative z-10 w-auto h-[720px] sm:h-[1420px] mask-fade-b drop-shadow-[0_24px_60px_rgba(99,102,241,0.28)]"
             />
           </div>
 
@@ -125,7 +125,7 @@ export default function LandingPage() {
         </section>
 
         {/* ── Section 2 — How it remembers ── */}
-        <section id="how" className="snap-start snap-always relative min-h-screen flex flex-col items-center justify-center overflow-hidden px-6 sm:px-16 lg:px-28 py-28">
+        <section id="how" className="snap-start snap-always relative min-h-[100svh] flex flex-col items-center justify-center overflow-hidden px-6 sm:px-16 lg:px-28 py-24 sm:py-28">
           {/* richer backdrop */}
           <div className="absolute inset-0 noise-grid opacity-50" />
           <div className="bloom bloom-violet w-[460px] h-[460px] -top-10 -left-16 opacity-35" />
@@ -135,12 +135,12 @@ export default function LandingPage() {
           <span className="absolute right-[14%] top-[30%] w-1.5 h-1.5 rounded-full bg-[#a855f7] opacity-50 anim-float" style={{ animationDelay: '1s' }} />
           <span className="absolute left-[20%] bottom-[22%] w-1.5 h-1.5 rounded-full bg-[#06b6d4] opacity-50 anim-float" style={{ animationDelay: '1.6s' }} />
 
-          <Reveal className="relative z-10 text-center mb-14">
-            <p className="text-sm font-bold tracking-widest uppercase text-[var(--faint)] mb-4">How it works</p>
-            <h2 className="display text-5xl sm:text-7xl font-bold">How it remembers.</h2>
+          <Reveal className="relative z-10 text-center mb-9 sm:mb-14">
+            <p className="text-[13px] sm:text-sm font-bold tracking-widest uppercase text-[var(--faint)] mb-3 sm:mb-4">How it works</p>
+            <h2 className="display text-[2.6rem] sm:text-7xl font-bold">How it remembers.</h2>
           </Reveal>
 
-          <div className="relative z-10 grid md:grid-cols-3 gap-6 w-full max-w-6xl">
+          <div className="relative z-10 grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 w-full max-w-6xl">
             <Reveal delay={0}>
               <StepCard n="01" title="Ask" kicker="It recalls what it already knows." fill="var(--lavender)">
                 <span className="w-[4.5rem] h-[4.5rem] rounded-2xl bg-white border-2 border-[#0e0e0e] flex items-center justify-center transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6">
@@ -168,7 +168,7 @@ export default function LandingPage() {
         </section>
 
         {/* ── Section 3 — Proof + CTA (two-column finale) ── */}
-        <section id="proof" className="snap-start snap-always relative min-h-screen flex items-center overflow-hidden px-6 sm:px-16 lg:px-28 py-24">
+        <section id="proof" className="snap-start snap-always relative min-h-[100svh] flex items-center overflow-hidden px-6 sm:px-16 lg:px-28 py-24 pb-32 sm:pb-24">
           <div className="bloom bloom-violet w-[520px] h-[520px] -top-16 -left-24 opacity-35" />
           <div className="bloom bloom-teal w-[560px] h-[560px] bottom-[-8rem] -right-24 opacity-35" />
           <div className="bloom-band -bottom-12 h-64 opacity-60" />
@@ -176,13 +176,13 @@ export default function LandingPage() {
           <div className="relative z-10 w-full max-w-6xl mx-auto grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
             {/* left — statement + CTA */}
             <Reveal>
-              <p className="text-sm font-bold tracking-widest uppercase text-[var(--faint)] mb-5">Proof, not promises</p>
-              <h2 className="display text-5xl sm:text-7xl font-bold mb-6">
+              <p className="text-[13px] sm:text-sm font-bold tracking-widest uppercase text-[var(--faint)] mb-4 sm:mb-5">Proof, not promises</p>
+              <h2 className="display text-[2.6rem] sm:text-7xl font-bold mb-5 sm:mb-6">
                 Most AI forgets.
                 <br />
                 <span className="grad-text">Mnemos remembers.</span>
               </h2>
-              <p className="text-lg text-[var(--muted)] max-w-md mb-9 leading-relaxed">
+              <p className="text-base sm:text-lg text-[var(--muted)] max-w-md mb-7 sm:mb-9 leading-relaxed">
                 Kill the server — memory comes back from Walrus, recalled by meaning and verifiable on-chain.
               </p>
               <Link href="/workspace" className="group pill pill-ink text-lg font-semibold px-9 py-4">

@@ -378,3 +378,19 @@ body {
   50% { transform: translateY(7px); }
 }
 .anim-bob { animation: bob 1.7s ease-in-out infinite; }
+
+/* ─── Snap scroll: gentle on phones, firm on desktop ────────────────────── */
+/* On phones, mandatory snap can trap a finger mid-section when a section is
+   taller than the viewport. Proximity snap lets it scroll freely yet still
+   settle on a section. Desktop (fine pointer) gets the crisp mandatory snap. */
+.snap-main {
+  scroll-snap-type: y proximity;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+@media (min-width: 1024px) and (pointer: fine) {
+  .snap-main { scroll-snap-type: y mandatory; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .snap-main { scroll-snap-type: none; }
+}

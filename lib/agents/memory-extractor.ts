@@ -140,29 +140,57 @@ export async function decideMemory(params: {
   }
 }
 
-const MSG_DECISION_SYSTEM = `You are Mnemos's memory curator. A user is chatting with the assistant. Decide whether THIS user message contains durable knowledge worth remembering long-term in a workspace memory engine.
+const MSG_DECISION_SYSTEM = `You are Mnemos's memory curator. A user is chatting with the assistant. Decide whether THIS user message contains NEW durable knowledge the user is asserting, worth remembering long-term in a workspace memory engine.
 
-STORE: stated decisions, architecture choices, project direction, preferences ("I want…", "always/never…", "my name is…", "we use…"), constraints, plans, conclusions, important facts the user wants remembered.
+STORE only when the user STATES something new: decisions, architecture choices, project direction, preferences ("I want…", "always/never…", "my name is…", "we use…"), constraints, plans, conclusions, or important new facts.
 
-DO NOT store: greetings, small talk, acknowledgements, questions with no new info, or vague chatter.
+NEVER STORE retrieval requests — these ask Mnemos to USE memory, they do not add memory:
+- recall questions: "What did we decide…?", "What was our architecture decision?", "What did I say about X?"
+- continuation prompts: "Continue from the earlier decision.", "Based on previous memory, what next?"
+- summary requests: "Summarize what you remember.", "Remind me what we discussed."
+Also never store greetings, small talk, acknowledgements, or vague chatter.
+
+MIXED messages: if a message both references prior context AND states something new, store ONLY the new assertion. Set the summary to the NEW knowledge only, ignoring the recall part.
+Example: "Continue from the earlier architecture decision. Also, we decided to add workspace templates later." → store ONLY "We decided to add workspace templates later."
 
 Respond with ONLY valid JSON, no markdown:
 {
   "should_store": true|false,
   "memory_type": "decision|architecture|research|preference|plan|insight|summary|constraint|incident|general",
   "importance": 0.0-1.0,
-  "summary": "one or two sentences capturing the durable knowledge, written so a future session understands it",
+  "summary": "one or two sentences capturing ONLY the new durable knowledge, written so a future session understands it",
   "reason": "why store or skip",
   "tags": ["lowercase", "keywords"]
 }
 If should_store is false, omit the optional fields.`;
 
+// Deterministic guard: a message that is ONLY a recall/continuation/summary
+// request carries no new knowledge. Catches the common cases before the LLM,
+// but stays conservative — if the message also contains an assertion (e.g.
+// "we decided…", "my preference is…"), it is NOT treated as recall-only.
+const RECALL_OPENERS = /^(what|which|when|where|who|how|did|do|does|can you|could you|please|remind|tell me|summar[iy]|recall|continue|based on|use the|use our|use my|go on|carry on|pick up)\b/i;
+const ASSERTION_SIGNAL = /\b(we (decided|chose|agreed|will|are|use|need|want|should)|i (decided|chose|prefer|want|like|use|need|am|will)|my (name|preference|goal)|our (decision|plan|goal|preference|direction)|let'?s (use|go with|do)|the (decision|plan|architecture|direction) is|is to)\b/i;
+
+function isRecallOnly(message: string): boolean {
+  const text = message.trim();
+  const isQuestion = text.endsWith('?');
+  const looksRecall = RECALL_OPENERS.test(text);
+  const hasAssertion = ASSERTION_SIGNAL.test(text);
+  // Recall-only = (a question OR a recall/continuation opener) AND no new assertion.
+  return (isQuestion || looksRecall) && !hasAssertion;
+}
+
 /**
- * Decides whether a raw conversational user message carries durable knowledge
- * worth storing (decisions/preferences/facts stated in normal chat).
+ * Decides whether a raw conversational user message carries NEW durable
+ * knowledge worth storing. Recall/continuation/summary requests are skipped.
  * Returns should_store:false on any failure (conservative).
  */
 export async function decideMemoryFromMessage(message: string): Promise<MemoryDecision> {
+  // Fast deterministic skip for pure retrieval/recall prompts.
+  if (isRecallOnly(message)) {
+    return { should_store: false, reason: 'Recall/continuation request — retrieves memory, adds none.' };
+  }
+
   const provider = getProvider();
   try {
     const response = await provider.call({

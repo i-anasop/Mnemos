@@ -9,6 +9,28 @@ import type { AgentEvent, MemoryBlob, MemoryRetrieval, ResearchReport, Synthesis
 
 export type Emitter = (event: AgentEvent) => void;
 
+/**
+ * Stores a memory with one retry on transient Walrus failure.
+ *
+ * storeMemory is atomic from the caller's view — it only returns a blob_id
+ * once the blob AND the index write succeed. If the first attempt throws, the
+ * index was not updated, so retrying cannot create a duplicate memory.
+ * Emits walrus_retrying before the second attempt; the caller emits
+ * memory_committed on success or walrus_warning on final failure.
+ */
+async function storeWithRetry(
+  params: Parameters<typeof storeMemory>[0],
+  emit: Emitter,
+): Promise<string> {
+  try {
+    return await storeMemory(params);
+  } catch {
+    emit({ event: 'walrus_retrying', attempt: 2 });
+    await new Promise((r) => setTimeout(r, 800));
+    return await storeMemory(params); // throws to caller if it fails again
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -189,7 +211,7 @@ export async function runOrchestrator(params: {
     if (msgDecision.should_store) {
       emit({ event: 'memory_committing' });
       try {
-        convo_blob_id = await storeMemory({
+        convo_blob_id = await storeWithRetry({
           content: { statement: query, summary: msgDecision.summary, confidence: msgDecision.importance },
           type: 'session_snapshot',
           tags: msgDecision.tags && msgDecision.tags.length > 0 ? msgDecision.tags : keywordTags(query),
@@ -199,10 +221,10 @@ export async function runOrchestrator(params: {
           memory_type: msgDecision.memory_type,
           importance: msgDecision.importance,
           summary: msgDecision.summary,
-        });
+        }, emit);
         emit({ event: 'memory_committed', blob_id: convo_blob_id, type: 'session_snapshot', memory_type: msgDecision.memory_type, importance: msgDecision.importance });
       } catch (err) {
-        emit({ event: 'walrus_warning', message: `Memory commit failed: ${err instanceof Error ? err.message : 'error'}` });
+        emit({ event: 'walrus_warning', message: `Memory commit failed after retry: ${err instanceof Error ? err.message : 'error'}` });
       }
     } else {
       emit({ event: 'memory_skipped', reason: msgDecision.reason });
@@ -306,7 +328,7 @@ export async function runOrchestrator(params: {
   if (decision.should_store) {
     emit({ event: 'memory_committing' });
     try {
-      blob_id = await storeMemory({
+      blob_id = await storeWithRetry({
         content: synthesis as unknown as Record<string, unknown>,
         type: 'synthesis_document',
         tags: decision.tags && decision.tags.length > 0 ? decision.tags : keywordTags(query),
@@ -316,7 +338,7 @@ export async function runOrchestrator(params: {
         memory_type: decision.memory_type,
         importance: decision.importance,
         summary: decision.summary,
-      });
+      }, emit);
       emit({
         event: 'memory_committed',
         blob_id,
@@ -326,7 +348,7 @@ export async function runOrchestrator(params: {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
-      emit({ event: 'walrus_warning', message: `Memory commit failed: ${msg}` });
+      emit({ event: 'walrus_warning', message: `Memory commit failed after retry: ${msg}` });
     }
   } else {
     emit({ event: 'memory_skipped', reason: decision.reason });

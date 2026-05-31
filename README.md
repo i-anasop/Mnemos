@@ -21,14 +21,16 @@
 
 AI agents are stateless. Every session starts from zero — the user becomes the memory layer, re-explaining context over and over. **Mnemos fixes this.**
 
-Mnemos is a multi-agent research system where every session builds on prior knowledge. Memories are stored as content-addressed blobs on [Walrus](https://walrus.xyz) (Sui's decentralized storage network), semantically indexed with vector embeddings, and automatically rehydrated on startup. **The agent gets smarter every session.**
+Mnemos is a **workspace-based AI memory engine**: one workspace = one persistent, verifiable memory context (a dedicated "brain" for a purpose — e.g. CIRO crisis intelligence, research, cybersecurity). It is *not* a chatbot that stores every message. Each turn is triaged — casual chat gets a friendly reply and is ignored, real research runs a multi-agent pipeline — and a **memory curator** decides whether the result carries durable knowledge worth keeping. Only meaningful artifacts (decisions, research findings, preferences, plans) are stored as content-addressed blobs on [Walrus](https://walrus.xyz) (Sui's decentralized storage), scoped to the workspace, semantically indexed, and rehydrated on startup. **The engine gets smarter every session — without filling Walrus with chat spam.**
 
 ### Key Properties
 
-- **Persistent** — memory survives server restarts; the vector index lives on Walrus, not in RAM
+- **Curated** — a memory-extraction step stores only durable knowledge; greetings, acknowledgements, and recall questions are skipped
+- **Workspace-scoped** — every memory carries a `workspace_id`; retrieval is isolated per workspace, so contexts never leak
+- **Persistent** — memory survives server restarts; the vector index lives on Walrus, not in RAM (single-retry on transient write failure)
 - **Verifiable** — every memory blob has a public `blob_id` readable directly from the Walrus aggregator
-- **Semantic** — retrieval is cosine similarity over Voyage AI embeddings, not keyword search
-- **Explainable** — each retrieval emits a score and plain-English reason in the live agent feed
+- **Semantic** — retrieval is cosine similarity over Voyage AI embeddings, ranked by relevance · importance · recency · confidence
+- **Explainable** — each retrieval emits a score, type, and plain-English reason in the live feed
 - **Portable** — memory is user-owned; no lock-in to a single session or server
 
 ---
@@ -42,16 +44,16 @@ Mnemos is a multi-agent research system where every session builds on prior know
 ### Memory Persistence Model
 
 ```
-storeMemory()
-  ├── embed content          → Voyage AI (512-dim)
-  ├── store memory blob      → Walrus (blob_id_A)
-  ├── store embedding blob   → Walrus (blob_id_B)
-  ├── update VectorIndex     → Walrus (blob_id_C)  ← latest index
-  └── write registry         → data/registry.json  ← pointer to blob_id_C
+storeMemory()   (only runs when the curator says should_store)
+  ├── embed summary+content  → Voyage AI (512-dim)
+  ├── store memory blob      → Walrus (blob_id_A)   ← curated artifact + metadata
+  ├── update VectorIndex     → Walrus (blob_id_B)   ← vector lives in the index
+  └── write registry         → data/registry.json   ← pointer to blob_id_B
+  (one automatic retry if a Walrus write transiently fails)
 
 On server restart:
   loadIndex()
-  ├── read registry.json     → blob_id_C
+  ├── read registry.json     → blob_id_B
   └── fetch VectorIndex      → Walrus aggregator ✓
 ```
 
@@ -61,16 +63,20 @@ On server restart:
 
 | Event | Description |
 |-------|-------------|
-| `session_start` | New session opened |
-| `memory_loaded` | N prior blobs retrieved from Walrus |
-| `memory_selected` | Per-blob: cosine score, confidence, reason string |
-| `research_start` | Researcher agent begins |
+| `session_start` | New session opened (carries `workspace_id`) |
+| `casual_reply` | Conversational / casual reply text (no pipeline) |
+| `memory_loaded` | N prior blobs retrieved from the workspace |
+| `memory_selected` | Per-blob: cosine score, type, importance, workspace, reason |
+| `research_start` | Researcher agent begins (research lane only) |
 | `research_complete` | N findings, confidence score |
 | `synthesis_start` | Synthesizer cross-referencing sessions |
 | `synthesis_complete` | Themes, confidence delta vs. prior sessions |
+| `memory_decision` | Curator's structured store/skip decision |
 | `memory_committing` | Writing to Walrus testnet |
-| `memory_committed` | Blob ID confirmed on Walrus |
-| `session_complete` | Duration, summary |
+| `walrus_retrying` | First write failed — retrying once |
+| `memory_committed` | Blob ID confirmed on Walrus (+ type, importance) |
+| `memory_skipped` | Nothing durable to store — reason given |
+| `session_complete` | Duration, summary, reply mode, synthesis |
 
 ---
 
@@ -120,15 +126,18 @@ mnemos/
 │   │   ├── diagnostic/   # Health check: LLM + Voyage + Walrus + index
 │   │   ├── embed/        # Voyage AI embedding endpoint
 │   │   └── memory/       # Blob list + blob content fetch
-│   ├── workspace/        # 3-panel research UI
+│   ├── workspace/        # Chat workspace (sidebar + multi-turn transcript)
 │   └── page.tsx          # Landing page
 ├── components/
 │   ├── agent/            # AgentFeed — live SSE event renderer
 │   ├── memory/           # MemoryExplorer — blob list sidebar
 │   └── workspace/        # QueryInput
 ├── lib/
+│   ├── workspace.ts          # Workspace model (one workspace = one brain)
 │   ├── agents/
-│   │   ├── orchestrator.ts   # 4-phase pipeline + SSE emitter
+│   │   ├── orchestrator.ts   # Triage → reply/research → decide → store + SSE
+│   │   ├── responder.ts      # Memory-aware conversational reply
+│   │   ├── memory-extractor.ts # Triage + memory curator (store/skip decision)
 │   │   ├── researcher.ts     # Structured JSON reports (Zod-validated)
 │   │   └── synthesizer.ts    # Cross-session synthesis + confidence delta
 │   ├── embeddings/
@@ -164,8 +173,8 @@ Runs the full research + memory workflow. Returns a Server-Sent Events stream.
 
 ---
 
-### `GET /api/memory?user_id=<id>`
-Returns blob metadata list for a user, rehydrated from Walrus on first call.
+### `GET /api/memory?user_id=<id>&workspace_id=<id>`
+Returns the memory list for a user, scoped to a workspace, rehydrated from Walrus on first call. Each item includes `memory_type`, `importance`, `summary`, and `workspace_id`.
 
 ---
 

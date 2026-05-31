@@ -77,6 +77,7 @@ const STAGE: Record<string, StageStyle> = {
   synthesis_complete: { icon: 'check',   label: 'Synthesis complete',      accent: '#22c55e', node: 'solid' },
   memory_decision:    { icon: 'sparkle', label: 'Memory decision',         accent: '#a855f7', node: 'solid' },
   memory_committing:  { icon: 'commit',  label: 'Committing to Walrus',    accent: '#f59e0b', node: 'solid' },
+  walrus_retrying:    { icon: 'restart', label: 'Retrying Walrus write',   accent: '#f59e0b', node: 'solid' },
   memory_committed:   { icon: 'database', label: 'Memory stored on Walrus', accent: '#06b6d4', node: 'grad' },
   memory_skipped:     { icon: 'close',   label: 'Not worth storing',       accent: '#9a9a93', node: 'solid' },
   casual_reply:       { icon: 'sparkle', label: 'Replied',                 accent: '#9a9a93', node: 'solid' },
