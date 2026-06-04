@@ -183,7 +183,7 @@ function isRecallOnly(message: string): boolean {
 
 // Identity / profile questions → answered from the Profile Memory Layer, never
 // from fuzzy vector search. "who am I", "what's my name", "my tech stack", …
-const PROFILE_QUERY = /\b(who\s*(?:am|m)\s*i|what'?s my name|what is my name|do you (?:know|remember) (?:my name|me)|what do you know about me|tell me about (?:me|myself)|what'?s my (?:tech ?stack|stack|role|job|profession)|what am i (?:studying|working on|into|doing)|what are my (?:interests|skills|technolog\w*)|my profile|about me)\b/i;
+const PROFILE_QUERY = /\b(who\s*(?:am|m)\s*i|what'?s my name|what is my name|what (?:was|were) my name|(?:do |did )?you (?:know|remember) (?:my name|me\b)|know my name|remember my name|whats my name|what do you know about me|tell me about (?:me|myself)|what'?s my (?:tech ?stack|stack|role|job|profession)|what am i (?:studying|working on|into|doing)|what are my (?:interests|skills|technolog\w*)|my profile|about me)\b/i;
 
 /** True if the message is asking the engine to recall the user's identity/profile. */
 export function isProfileQuery(message: string): boolean {
@@ -212,7 +212,12 @@ export function attemptedNameIntro(message: string): boolean {
 // Words that end a name capture — connectives, pronouns, fillers, verbs. A name
 // is only the proper-noun tokens BEFORE any of these (so "Aura and i am a
 // student…" yields just "Aura", never the whole sentence).
-const NAME_STOP = /^(and|but|&|or|who|i|im|a|an|the|is|am|are|was|were|of|for|to|so|because|since|now|here|there|bro|dude|man|guys?|please|not|really|very|just)$/i;
+const NAME_STOP = /^(and|but|&|or|who|i|im|a|an|the|is|am|are|was|were|of|for|to|so|because|since|now|here|there|bro|dude|man|sir|maam|guys?|please|not|really|very|just|btw|though|tho|lol|lmao|haha|hahaha|ok|okay|yeah|yep|yup|actually|basically|anyway|anyways|right|then)$/i;
+
+// Common completions of "I am ___" / "I'm ___" that are NOT names: states,
+// feelings, articles, fillers, and occupation nouns (handled as roles). Lets us
+// accept a LOWERCASE bare name ("i am aura") while rejecting "i am hungry".
+const NON_NAME_WORD = /^(a|an|the|not|just|really|very|so|too|also|now|here|there|back|home|away|online|offline|free|busy|fine|good|great|ok|okay|well|alright|cool|glad|happy|sad|mad|angry|bored|tired|sleepy|exhausted|sick|ill|hungry|thirsty|full|hot|cold|late|early|old|young|new|ready|done|sure|sorry|confused|lost|excited|nervous|scared|afraid|stressed|calm|curious|interested|learning|working|studying|trying|looking|feeling|thinking|going|doing|from|in|on|at|your|my|his|her|their|our|this|that|these|those|it|im|i|student|dev|developer|coder|programmer|engineer|designer|researcher|founder|builder|analyst|scientist|teacher|writer|consultant|freelancer|architect|guy|girl|boy|man|woman|person|human|user|me|myself)$/i;
 
 function titleCaseToken(t: string): string {
   return t.length ? t[0].toUpperCase() + t.slice(1) : t;
@@ -236,9 +241,11 @@ function extractName(text: string): string | undefined {
     if (m) { raw = m[1]; break; }
   }
   if (!raw) {
-    // "I am Aura" / "I'm Aura" — a capitalized proper noun (not a verb/role).
-    const m = text.match(/\b[Ii](?:'m| am)\s+([A-Z][a-z'’-]+)\b/);
-    if (m) raw = m[1];
+    // "I am Aura", "I'm aura", "im aura btw" — the first token after I am/I'm.
+    // Accept LOWERCASE (people type "i am aura"), but reject common non-name
+    // completions ("I am hungry", "I am a student") via NON_NAME_WORD.
+    const m = text.match(/\b(?:i'?m|i\s+am)\s+([A-Za-z][A-Za-z'’-]{1,19})\b/i);
+    if (m && !NON_NAME_WORD.test(m[1])) raw = m[1];
   }
   if (!raw) return undefined;
 
