@@ -217,7 +217,7 @@ const NAME_STOP = /^(and|but|&|or|who|i|im|a|an|the|is|am|are|was|were|of|for|to
 // Common completions of "I am ___" / "I'm ___" that are NOT names: states,
 // feelings, articles, fillers, and occupation nouns (handled as roles). Lets us
 // accept a LOWERCASE bare name ("i am aura") while rejecting "i am hungry".
-const NON_NAME_WORD = /^(a|an|the|not|just|really|very|so|too|also|now|here|there|back|home|away|online|offline|free|busy|fine|good|great|ok|okay|well|alright|cool|glad|happy|sad|mad|angry|bored|tired|sleepy|exhausted|sick|ill|hungry|thirsty|full|hot|cold|late|early|old|young|new|ready|done|sure|sorry|confused|lost|excited|nervous|scared|afraid|stressed|calm|curious|interested|learning|working|studying|trying|looking|feeling|thinking|going|doing|from|in|on|at|your|my|his|her|their|our|this|that|these|those|it|im|i|student|dev|developer|coder|programmer|engineer|designer|researcher|founder|builder|analyst|scientist|teacher|writer|consultant|freelancer|architect|guy|girl|boy|man|woman|person|human|user|me|myself|no|yes|yeah|yep|nope|nah|hi|hey|hello|bye|thanks|thx|idk|dunno|maybe|nothing|something|anything|everyone|someone)$/i;
+const NON_NAME_WORD = /^(a|an|the|not|just|really|very|so|too|also|now|here|there|back|home|away|online|offline|free|busy|fine|good|great|ok|okay|well|alright|cool|glad|happy|sad|mad|angry|bored|tired|sleepy|exhausted|sick|ill|hungry|thirsty|full|hot|cold|late|early|old|young|new|ready|done|sure|sorry|confused|lost|excited|nervous|scared|afraid|stressed|calm|curious|interested|learning|working|studying|trying|looking|feeling|thinking|going|doing|from|in|on|at|your|my|his|her|their|our|this|that|these|those|it|im|i|student|dev|developer|coder|programmer|engineer|designer|researcher|founder|builder|analyst|scientist|teacher|writer|consultant|freelancer|architect|guy|girl|boy|man|woman|person|human|user|me|myself|no|yes|yeah|yep|nope|nah|hi|hey|hello|bye|thanks|thx|idk|dunno|maybe|nothing|something|anything|everyone|someone|deep|deeply|super|pretty|kinda|sorta|quite|all|big|into)$/i;
 
 function titleCaseToken(t: string): string {
   return t.length ? t[0].toUpperCase() + t.slice(1) : t;
@@ -242,10 +242,16 @@ function extractName(text: string): string | undefined {
   }
   if (!raw) {
     // "I am Aura", "I'm aura", "im aura btw" — the first token after I am/I'm.
-    // Accept LOWERCASE (people type "i am aura"), but reject common non-name
-    // completions ("I am hungry", "I am a student") via NON_NAME_WORD.
-    const m = text.match(/\b(?:i'?m|i\s+am)\s+([A-Za-z][A-Za-z'’-]{1,19})\b/i);
-    if (m && !NON_NAME_WORD.test(m[1])) raw = m[1];
+    // Accept LOWERCASE (people type "i am aura"), but reject:
+    //  - common non-name completions ("I am hungry", "I am a student")
+    //  - a token followed by a preposition ("I am deep INTO AI") → it's an
+    //    adjective, not a name.
+    const m = text.match(/\b(?:i'?m|i\s+am)\s+([A-Za-z][A-Za-z'’-]{1,19})\b(.*)$/i);
+    if (m && !NON_NAME_WORD.test(m[1])) {
+      const rest = m[2].trim().toLowerCase();
+      const badFollow = /^(into|in|on|at|with|about|for|to|of|from|over|under|like|as|by|than)\b/.test(rest);
+      if (!badFollow) raw = m[1];
+    }
   }
   if (!raw) return undefined;
 

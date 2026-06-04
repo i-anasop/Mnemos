@@ -188,7 +188,7 @@ export async function runOrchestrator(params: {
       // Merge + persist LOCALLY first (instant) so the next turn ("who am I?")
       // recalls it even before Walrus responds. This kills the recall race.
       const existing = profile ?? emptyProfile(user_id, workspace_id);
-      let merged = mergeProfile(existing, facts);
+      const merged = mergeProfile(existing, facts);
       await persistProfileLocal(merged);
 
       // Deterministic confirmation — never an LLM, so it's always exactly right.
@@ -203,32 +203,19 @@ export async function runOrchestrator(params: {
         casual: { text: reply },
       });
 
-      // Durable artifact + Walrus mirror, AFTER the answer is already on screen.
+      // Mirror the profile object to Walrus, AFTER the answer is on screen.
+      // Profile facts are recalled deterministically, so we do NOT embed/index
+      // them (saves scarce embedding quota for decisions/research). The Walrus
+      // copy of the profile object is the durable artifact + the saved proof.
       emit({ event: 'memory_committing' });
-      let artifactBlobId: string | undefined;
-      try {
-        artifactBlobId = await storeWithRetry({
-          content: { statement: query, summary: profileDecision.summary, facts, confidence: profileDecision.importance },
-          type: 'session_snapshot',
-          tags: profileDecision.tags?.length ? profileDecision.tags : keywordTags(query),
-          session_id, user_id, workspace_id,
-          memory_type: 'profile_fact',
-          importance: profileDecision.importance,
-          summary: profileDecision.summary,
-        }, emit);
-      } catch {
-        // Walrus artifact write failed — the profile is still saved locally.
-      }
-      merged = mergeProfile(merged, {}, artifactBlobId);
       const { walrusBlobId } = await saveProfile(merged);
 
-      const proof = artifactBlobId ?? walrusBlobId;
-      if (proof) {
-        emit({ event: 'memory_committed', blob_id: proof, type: 'profile', memory_type: 'profile_fact', importance: profileDecision.importance });
+      if (walrusBlobId) {
+        emit({ event: 'memory_committed', blob_id: walrusBlobId, type: 'profile', memory_type: 'profile_fact', importance: profileDecision.importance });
       } else {
         emit({ event: 'walrus_warning', message: 'Saved to your profile (local) — Walrus sync pending on testnet.' });
       }
-      return { casual: reply, blob_id: proof };
+      return { casual: reply, blob_id: walrusBlobId };
     }
 
     // ── (b) Recall path: identity/profile question → answer from the object ──
