@@ -1,6 +1,11 @@
 import { getProvider } from '@/lib/llm';
 import { profileToContext } from '@/lib/profile/store';
-import type { MemoryBlob, ProfileFacts, SynthesisDocument, UserProfile } from '@/types';
+import type { ChatMessage, MemoryBlob, ProfileFacts, SynthesisDocument, UserProfile } from '@/types';
+
+// Keep the prompt small: only the last few turns matter for context.
+function recentHistory(history: ChatMessage[], max = 6): ChatMessage[] {
+  return history.filter((m) => m.content?.trim()).slice(-max);
+}
 
 /* Conversational reply — a natural, memory-aware assistant turn.
    Used for casual chat AND normal conversational questions (NOT research, and
@@ -42,9 +47,11 @@ export async function runConversationalReply(params: {
   profile?: UserProfile | null;
   workspaceLabel?: string;
   casual?: boolean;
+  history?: ChatMessage[];
 }): Promise<string> {
-  const { message, memories = [], profile = null, workspaceLabel = 'this workspace', casual = false } = params;
+  const { message, memories = [], profile = null, workspaceLabel = 'this workspace', casual = false, history = [] } = params;
   const provider = getProvider();
+  const priorTurns = recentHistory(history);
 
   // ── Casual greeting / acknowledgement: just be friendly, never mention
   // memory, recall, or "our conversation so far" (that line annoyed the user). ──
@@ -53,7 +60,7 @@ export async function runConversationalReply(params: {
     try {
       const response = await provider.call({
         system,
-        messages: [{ role: 'user', content: message }],
+        messages: [...priorTurns, { role: 'user', content: message }],
         max_tokens: 80,
         temperature: 0.7,
       });
@@ -88,7 +95,7 @@ Truths about you, so you never answer incorrectly:
   try {
     const response = await provider.call({
       system,
-      messages: [{ role: 'user', content: message }],
+      messages: [...priorTurns, { role: 'user', content: message }],
       max_tokens: 320,
       temperature: 0.6,
     });

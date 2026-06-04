@@ -25,10 +25,17 @@ export interface ProfileFacts {
   name?: string;
   role?: string;
   education?: string;
+  occupation?: string;        // "what I do" — "I do AI", "I work in fintech"
   current_focus?: string;
   interests?: string[];
   tech_stack?: string[];
   [key: string]: string | string[] | undefined;
+}
+
+// A single prior conversation turn, passed to the engine for context.
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
 }
 
 // ─── Profile Memory Layer ────────────────────────────────────────────────────
@@ -40,6 +47,7 @@ export interface ProfileState {
   name?: string;
   role?: string;
   education?: string;
+  occupation?: string;       // "what I do" — field/work ("artificial intelligence")
   interests: string[];
   tech_stack: string[];
   preferences: string[];
@@ -231,6 +239,7 @@ export interface AgentRequestBody {
   session_id: string;
   user_id: string;
   workspace_id?: string;
+  history?: ChatMessage[];   // recent prior turns for conversational context
 }
 
 export interface MemoryResponseItem {

@@ -9,7 +9,7 @@ import {
   confirmProfileUpdate, answerProfileQuery, isEmptyProfile,
 } from '@/lib/profile/store';
 import { DEFAULT_WORKSPACE_ID, getWorkspace } from '@/lib/workspace';
-import type { AgentEvent, MemoryBlob, MemoryRetrieval, ResearchReport, SynthesisDocument } from '@/types';
+import type { AgentEvent, ChatMessage, MemoryBlob, MemoryRetrieval, ResearchReport, SynthesisDocument } from '@/types';
 
 export type Emitter = (event: AgentEvent) => void;
 
@@ -140,11 +140,18 @@ export async function runOrchestrator(params: {
   session_id: string;
   user_id: string;
   workspace_id?: string;
+  history?: ChatMessage[];
   emit: Emitter;
 }): Promise<{ synthesis?: SynthesisDocument; blob_id?: string; casual?: string }> {
   const { query, session_id, user_id, emit } = params;
   const workspace_id = params.workspace_id ?? DEFAULT_WORKSPACE_ID;
+  const history = params.history ?? [];
   const start = Date.now();
+
+  // Did the assistant just ask for the user's name? Then a bare reply
+  // ("its aura") is the name. Used by the deterministic extractor.
+  const lastAssistant = [...history].reverse().find((m) => m.role === 'assistant')?.content ?? '';
+  const askedForName = /your name|call you|tell me your name|what'?s your name|introduce yourself|remember about you/i.test(lastAssistant);
 
   emit({ event: 'session_start', session_id, workspace_id });
   const workspaceLabel = getWorkspace(workspace_id).label;
@@ -153,7 +160,7 @@ export async function runOrchestrator(params: {
 
   // ── Casual: greeting / acknowledgement → quick reply, no memory, no store ──
   if (triage.mode === 'casual') {
-    const text = await runConversationalReply({ message: query, workspaceLabel, casual: true });
+    const text = await runConversationalReply({ message: query, workspaceLabel, casual: true, history });
     emit({ event: 'casual_reply', text });
     emit({ event: 'memory_skipped', reason: triage.reason });
     emit({
@@ -174,7 +181,7 @@ export async function runOrchestrator(params: {
     const profile = await loadProfile(user_id, workspace_id).catch(() => null);
 
     // ── (a) Storing path: the message states durable profile facts ──────────
-    const profileDecision = isIntentWithoutValue(query) ? null : decideProfileFact(query);
+    const profileDecision = isIntentWithoutValue(query, { askedForName }) ? null : decideProfileFact(query, { askedForName });
     if (profileDecision?.facts) {
       const facts = profileDecision.facts;
 
@@ -283,7 +290,7 @@ export async function runOrchestrator(params: {
       emit({ event: 'walrus_warning', message: 'Memory retrieval failed — replying without it' });
     }
 
-    const text = await runConversationalReply({ message: query, memories: convoMemories, profile, workspaceLabel });
+    const text = await runConversationalReply({ message: query, memories: convoMemories, profile, workspaceLabel, history });
     emit({ event: 'casual_reply', text });
     emit({
       event: 'session_complete',

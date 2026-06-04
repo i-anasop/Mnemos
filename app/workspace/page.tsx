@@ -116,6 +116,19 @@ export default function WorkspacePage() {
 
     const sessionId = uuidv4();
     const turnId = sessionId;
+
+    // Build recent conversation history (prior completed turns) for context, so
+    // the engine understands follow-ups like "its aura" or "no, what do i do?".
+    const history = turns
+      .filter(t => t.done)
+      .flatMap(t => {
+        const reply = t.casual ?? (t.synthesis ? `[Answered: ${t.synthesis.synthesis_goal.replace(/^Synthesize findings on:\s*/i, '')}]` : '');
+        const msgs: { role: 'user' | 'assistant'; content: string }[] = [{ role: 'user', content: t.query }];
+        if (reply) msgs.push({ role: 'assistant', content: reply });
+        return msgs;
+      })
+      .slice(-8);
+
     // Append a new turn (keeps the whole conversation on screen).
     setTurns(prev => [...prev, { id: turnId, query, events: [], memoryCount: 0, done: false }]);
     setIsRunning(true);
@@ -127,7 +140,7 @@ export default function WorkspacePage() {
       const res = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, session_id: sessionId, user_id: DEMO_USER_ID, workspace_id: WORKSPACE_ID }),
+        body: JSON.stringify({ query, session_id: sessionId, user_id: DEMO_USER_ID, workspace_id: WORKSPACE_ID, history }),
       });
 
       if (!res.ok || !res.body) {
@@ -190,7 +203,7 @@ export default function WorkspacePage() {
     } finally {
       setIsRunning(false);
     }
-  }, [isRunning, refreshBlobs, closeSidebarOnMobile]);
+  }, [isRunning, refreshBlobs, closeSidebarOnMobile, turns]);
 
   const hasActivity = turns.length > 0;
 

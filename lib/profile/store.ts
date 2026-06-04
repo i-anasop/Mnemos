@@ -62,7 +62,7 @@ export function isEmptyProfile(p: UserProfile | null | undefined): boolean {
   const s = p?.profile;
   if (!s) return true;
   return (
-    !isValidName(s.name) && !s.role && !s.education &&
+    !isValidName(s.name) && !s.role && !s.education && !s.occupation &&
     s.interests.length === 0 && s.tech_stack.length === 0 &&
     s.preferences.length === 0 && s.facts.length === 0
   );
@@ -233,6 +233,7 @@ export function mergeProfile(
   if (isValidName(facts.name)) next.name = facts.name!.trim().replace(/[.!?,;:]+$/, '');
   if (typeof facts.role === 'string' && facts.role.trim()) next.role = facts.role.trim();
   if (typeof facts.education === 'string' && facts.education.trim()) next.education = facts.education.trim();
+  if (typeof facts.occupation === 'string' && facts.occupation.trim()) next.occupation = facts.occupation.trim();
   if (facts.interests?.length) next.interests = uniqMerge(next.interests, facts.interests);
   if (facts.tech_stack?.length) next.tech_stack = uniqMerge(next.tech_stack, facts.tech_stack);
   if (typeof facts.current_focus === 'string' && facts.current_focus.trim()) {
@@ -240,7 +241,7 @@ export function mergeProfile(
   }
   // Any extra string keys → durable free-form facts.
   for (const [k, v] of Object.entries(facts)) {
-    if (['name', 'role', 'education', 'current_focus', 'interests', 'tech_stack'].includes(k)) continue;
+    if (['name', 'role', 'education', 'occupation', 'current_focus', 'interests', 'tech_stack'].includes(k)) continue;
     if (typeof v === 'string' && v.trim()) next.facts = uniqMerge(next.facts, [`${k.replace(/_/g, ' ')}: ${v.trim()}`]);
   }
 
@@ -287,6 +288,7 @@ export function confirmProfileUpdate(facts: ProfileFacts): string {
   if (isValidName(facts.name)) parts.push(`your name is ${facts.name!.trim()}`);
   const roleStr = facts.education || facts.role;
   if (roleStr) parts.push(`you're ${article(roleStr)} ${roleStr}`);
+  if (facts.occupation) parts.push(`you work in ${facts.occupation}`);
   if (facts.tech_stack?.length) parts.push(`your tech stack is ${naturalList(facts.tech_stack)}`);
   if (facts.interests?.length) parts.push(`you're into ${naturalList(facts.interests)}`);
   if (facts.current_focus) parts.push(`you're focused on ${facts.current_focus}`);
@@ -311,7 +313,8 @@ export function answerProfileQuery(profile: UserProfile | null, query: string): 
   const q = query.toLowerCase();
   const aboutMe = /(about me|know about me|who am i|tell me about (me|myself)|my profile)/.test(q);
   const wantsName = aboutMe || /\bname\b|who am i|remember me|do you know me/.test(q);
-  const wantsRole = aboutMe || /\b(role|job|student|study|studying|do i do|profession|occupation)\b/.test(q) || /who am i/.test(q);
+  const wantsDoes = aboutMe || /\b(what (do|am) i (do|doing)|do i do|occupation|profession|my job|my work|my field|work (on|in))\b/.test(q);
+  const wantsRole = wantsDoes || /\b(role|student|study|studying)\b/.test(q) || /who am i/.test(q);
   const wantsStack = aboutMe || /\b(tech ?stack|stack|technolog|what do i (use|code|build)|languages?|tools?)\b/.test(q);
   const wantsInterests = aboutMe || /\b(interest|interested|into|like|love|passion)\b/.test(q);
 
@@ -322,6 +325,10 @@ export function answerProfileQuery(profile: UserProfile | null, query: string): 
     else sentences.push(`I don't have your name stored yet.`);
   }
   if (wantsRole && roleStr) sentences.push(`You told me you're ${article(roleStr)} ${roleStr}.`);
+  if (wantsDoes) {
+    if (s!.occupation) sentences.push(`You work in ${s!.occupation}.`);
+    else if (!roleStr && !aboutMe) sentences.push(`I don't have what you do stored yet — tell me and I'll remember.`);
+  }
   if (wantsStack) {
     if (s!.tech_stack.length) sentences.push(`Your tech stack is ${naturalList(s!.tech_stack)}.`);
     else if (!aboutMe) sentences.push(`I don't have your tech stack stored yet.`);
@@ -333,6 +340,7 @@ export function answerProfileQuery(profile: UserProfile | null, query: string): 
   if (sentences.length === 0) {
     if (name) sentences.push(`You are ${name}.`);
     if (roleStr) sentences.push(`You're ${article(roleStr)} ${roleStr}.`);
+    if (s!.occupation) sentences.push(`You work in ${s!.occupation}.`);
     if (s!.tech_stack.length) sentences.push(`Your tech stack is ${naturalList(s!.tech_stack)}.`);
     if (s!.interests.length) sentences.push(`You're into ${naturalList(s!.interests)}.`);
   }
@@ -349,6 +357,7 @@ export function profileToContext(profile: UserProfile | null): string | null {
   if (isValidName(s.name)) lines.push(`  · name = ${s.name}`);
   if (s.role) lines.push(`  · role = ${s.role}`);
   if (s.education) lines.push(`  · education = ${s.education}`);
+  if (s.occupation) lines.push(`  · works in = ${s.occupation}`);
   if (s.tech_stack.length) lines.push(`  · tech stack = ${s.tech_stack.join(', ')}`);
   if (s.interests.length) lines.push(`  · interests = ${s.interests.join(', ')}`);
   if (s.preferences.length) lines.push(`  · preferences = ${s.preferences.join(', ')}`);

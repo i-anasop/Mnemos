@@ -183,7 +183,7 @@ function isRecallOnly(message: string): boolean {
 
 // Identity / profile questions → answered from the Profile Memory Layer, never
 // from fuzzy vector search. "who am I", "what's my name", "my tech stack", …
-const PROFILE_QUERY = /\b(who\s*(?:am|m)\s*i|what'?s my name|what is my name|what (?:was|were) my name|(?:do |did )?you (?:know|remember) (?:my name|me\b)|know my name|remember my name|whats my name|what do you know about me|tell me about (?:me|myself)|what'?s my (?:tech ?stack|stack|role|job|profession)|what am i (?:studying|working on|into|doing)|what are my (?:interests|skills|technolog\w*)|my profile|about me)\b/i;
+const PROFILE_QUERY = /\b(who\s*(?:am|m)\s*i|what'?s my name|what is my name|what (?:was|were) my name|(?:do |did )?you (?:know|remember) (?:my name|me\b)|know my name|remember my name|whats my name|what do you know about me|tell me about (?:me|myself)|what'?s my (?:tech ?stack|stack|role|job|profession|occupation|field|work)|what (?:do|am) i (?:do|doing|studying|work(?:ing)? (?:on|in)|into)|what are my (?:interests|skills|technolog\w*)|my profile|about me)\b/i;
 
 /** True if the message is asking the engine to recall the user's identity/profile. */
 export function isProfileQuery(message: string): boolean {
@@ -217,7 +217,7 @@ const NAME_STOP = /^(and|but|&|or|who|i|im|a|an|the|is|am|are|was|were|of|for|to
 // Common completions of "I am ___" / "I'm ___" that are NOT names: states,
 // feelings, articles, fillers, and occupation nouns (handled as roles). Lets us
 // accept a LOWERCASE bare name ("i am aura") while rejecting "i am hungry".
-const NON_NAME_WORD = /^(a|an|the|not|just|really|very|so|too|also|now|here|there|back|home|away|online|offline|free|busy|fine|good|great|ok|okay|well|alright|cool|glad|happy|sad|mad|angry|bored|tired|sleepy|exhausted|sick|ill|hungry|thirsty|full|hot|cold|late|early|old|young|new|ready|done|sure|sorry|confused|lost|excited|nervous|scared|afraid|stressed|calm|curious|interested|learning|working|studying|trying|looking|feeling|thinking|going|doing|from|in|on|at|your|my|his|her|their|our|this|that|these|those|it|im|i|student|dev|developer|coder|programmer|engineer|designer|researcher|founder|builder|analyst|scientist|teacher|writer|consultant|freelancer|architect|guy|girl|boy|man|woman|person|human|user|me|myself)$/i;
+const NON_NAME_WORD = /^(a|an|the|not|just|really|very|so|too|also|now|here|there|back|home|away|online|offline|free|busy|fine|good|great|ok|okay|well|alright|cool|glad|happy|sad|mad|angry|bored|tired|sleepy|exhausted|sick|ill|hungry|thirsty|full|hot|cold|late|early|old|young|new|ready|done|sure|sorry|confused|lost|excited|nervous|scared|afraid|stressed|calm|curious|interested|learning|working|studying|trying|looking|feeling|thinking|going|doing|from|in|on|at|your|my|his|her|their|our|this|that|these|those|it|im|i|student|dev|developer|coder|programmer|engineer|designer|researcher|founder|builder|analyst|scientist|teacher|writer|consultant|freelancer|architect|guy|girl|boy|man|woman|person|human|user|me|myself|no|yes|yeah|yep|nope|nah|hi|hey|hello|bye|thanks|thx|idk|dunno|maybe|nothing|something|anything|everyone|someone)$/i;
 
 function titleCaseToken(t: string): string {
   return t.length ? t[0].toUpperCase() + t.slice(1) : t;
@@ -279,8 +279,14 @@ function looksLikeQuestion(s: string): boolean {
   return QUESTION_WORDS.test(s);
 }
 
+export interface ExtractOpts {
+  /** The previous assistant turn asked for the user's name → a short bare reply
+   *  ("its aura", "aura") should be read as the name. */
+  askedForName?: boolean;
+}
+
 /** Pulls structured profile facts from a raw user message. Returns null if none. */
-export function extractProfileFacts(message: string): ProfileFacts | null {
+export function extractProfileFacts(message: string, opts: ExtractOpts = {}): ProfileFacts | null {
   const text = message.trim();
   const facts: ProfileFacts = {};
 
@@ -314,6 +320,14 @@ export function extractProfileFacts(message: string): ProfileFacts | null {
     if (subj.length >= 2) { facts.education = subj; if (!facts.role) facts.role = 'student'; }
   }
 
+  // Occupation / field — "what I do": "I do X", "I work in/at/on X", "I'm into X".
+  // ("I work with X" is tech_stack, captured above.)
+  const occMatch = text.match(/\bi\s+(?:do|work (?:in|at|on))\s+([^.,;:!?\n]{2,40})/i);
+  if (occMatch && !looksLikeQuestion(occMatch[1])) {
+    const occ = occMatch[1].trim().replace(/\b(the field of|field of|currently|right now|now)\b/gi, '').trim();
+    if (occ.length >= 2) facts.occupation = occ;
+  }
+
   // Current focus: "currently learning X", "focused on X", "working on X".
   // (Plain "learning X" is too noisy — require a focus qualifier.) Drop filler.
   const focusMatch = text.match(/\b(?:currently (?:learning|studying|focused on|into)|focused on|working on|getting into)\s+([^.,;:!?\n]{2,60})/i);
@@ -330,19 +344,39 @@ export function extractProfileFacts(message: string): ProfileFacts | null {
     if (list.length) facts.interests = list;
   }
 
+  // Context-aware name: the assistant just asked for the name and the user gives
+  // a short bare reply — "its aura", "aura", "the name's aura". Only when we
+  // didn't already find a name, and the message isn't a question.
+  if (!facts.name && opts.askedForName && !looksLikeQuestion(text) && !text.endsWith('?')) {
+    const stripped = text
+      .replace(/^(?:it'?s|its|i'?m|im|the name'?s?|name'?s?|that'?s|thats|call me)\s+/i, '')
+      .replace(/[.!?]+$/, '')
+      .trim();
+    const toks = stripped.split(/\s+/).filter(Boolean);
+    if (toks.length >= 1 && toks.length <= 2) {
+      const clean = toks.map((t) => t.replace(/[^A-Za-z'’-]/g, '')).filter(Boolean);
+      if (clean.length && clean.every((t) => /^[A-Za-z][A-Za-z'’-]*$/.test(t) && !NON_NAME_WORD.test(t))) {
+        const candidate = clean.map(titleCaseToken).join(' ');
+        if (isValidName(candidate)) facts.name = candidate;
+      }
+    }
+  }
+
   return Object.keys(facts).length > 0 ? facts : null;
 }
 
 const FACT_LABELS: Record<string, string> = {
-  name: 'name', role: 'role', current_focus: 'current focus',
-  interests: 'interests', tech_stack: 'tech stack',
+  name: 'name', role: 'role', education: 'education', occupation: 'occupation',
+  current_focus: 'current focus', interests: 'interests', tech_stack: 'tech stack',
 };
 
 /** Builds a human summary from extracted facts, e.g. "User's name is Aura. …". */
 export function summarizeFacts(facts: ProfileFacts): string {
   const parts: string[] = [];
   if (facts.name) parts.push(`User's name is ${facts.name}.`);
-  if (facts.role) parts.push(`User is ${/^a|e|i|o|u/i.test(facts.role) ? 'an' : 'a'} ${facts.role}.`);
+  if (facts.role) parts.push(`User is ${/^[aeiou]/i.test(facts.role) ? 'an' : 'a'} ${facts.role}.`);
+  if (facts.education) parts.push(`User studies ${facts.education}.`);
+  if (facts.occupation) parts.push(`User works in ${facts.occupation}.`);
   if (facts.current_focus) parts.push(`User is currently ${facts.current_focus}.`);
   if (facts.interests?.length) parts.push(`User is interested in ${facts.interests.join(', ')}.`);
   if (facts.tech_stack?.length) parts.push(`User's tech stack includes ${facts.tech_stack.join(', ')}.`);
@@ -372,15 +406,15 @@ function factTags(facts: ProfileFacts): string[] {
 // share, with no actual value yet. Must NOT store (no fake proof).
 const INTENT_NO_VALUE = /\b(?:i (?:wanna|want to|would like to|need to)|let me|let'?s|please)\s+(?:remember|store|save|tell you|note|record)\b/i;
 
-export function isIntentWithoutValue(message: string): boolean {
+export function isIntentWithoutValue(message: string, opts: ExtractOpts = {}): boolean {
   if (!INTENT_NO_VALUE.test(message)) return false;
   // If the message ALSO contains a concrete profile fact, it's not empty intent.
-  return extractProfileFacts(message) === null;
+  return extractProfileFacts(message, opts) === null;
 }
 
-export function decideProfileFact(message: string): MemoryDecision | null {
-  if (isRecallOnly(message)) return null; // questions never set facts
-  const facts = extractProfileFacts(message);
+export function decideProfileFact(message: string, opts: ExtractOpts = {}): MemoryDecision | null {
+  if (isRecallOnly(message) && !opts.askedForName) return null; // questions never set facts
+  const facts = extractProfileFacts(message, opts);
   if (!facts) return null;
   return {
     should_store: true,
