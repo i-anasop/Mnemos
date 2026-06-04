@@ -2,12 +2,12 @@ import type { Metadata } from 'next';
 import { Geist_Mono } from 'next/font/google';
 import './globals.css';
 
-// Display/body type is Satoshi (loaded from Fontshare in <head>) — a clean
+// Display/body type is Satoshi (loaded from Fontshare in <head>), a clean
 // neo-grotesk, the closest free match to Walrus's hero typeface (Aeonik).
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Mnemos · Persistent AI Memory',
+  title: 'Mnemos - Persistent AI Memory',
   description:
     'A persistent AI memory engine powered by Walrus. Durable, verifiable memory for AI agents across sessions.',
   icons: {
@@ -17,7 +17,7 @@ export const metadata: Metadata = {
 
 // Silences the noisy "Cannot redefine property: ethereum" error thrown when
 // multiple crypto-wallet browser extensions fight over window.ethereum. It is
-// not a Mnemos error — this just stops the dev overlay from surfacing it.
+// not a Mnemos error; this just stops the dev overlay from surfacing it.
 const SUPPRESS_WALLET_ERROR = `(function(){
   function isWalletClash(m){return typeof m==='string'&&m.indexOf('Cannot redefine property: ethereum')!==-1;}
   window.addEventListener('error',function(e){if(e&&isWalletClash(e.message)){e.stopImmediatePropagation();e.preventDefault();}},true);
@@ -29,7 +29,12 @@ const THEME_INIT = `(function(){try{if(localStorage.getItem('mnemos-theme')==='d
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${geistMono.variable} h-full`}>
+    <html
+      lang="en"
+      className={`${geistMono.variable} h-full`}
+      data-scroll-behavior="smooth"
+      suppressHydrationWarning
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
         <link rel="preconnect" href="https://api.fontshare.com" crossOrigin="anonymous" />

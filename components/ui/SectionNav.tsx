@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const SECTIONS = [
   { id: 'hero', label: 'Top' },
@@ -10,9 +10,15 @@ const SECTIONS = [
 
 export default function SectionNav() {
   const [active, setActive] = useState('hero');
+  const activeRef = useRef(active);
+  const wheelLockedRef = useRef(false);
 
   useEffect(() => {
-    const root = document.querySelector('main');
+    activeRef.current = active;
+  }, [active]);
+
+  useEffect(() => {
+    const root = document.querySelector<HTMLElement>('.snap-main');
     const observers = SECTIONS.map((s) => {
       const el = document.getElementById(s.id);
       if (!el) return null;
@@ -26,6 +32,38 @@ export default function SectionNav() {
       return io;
     });
     return () => observers.forEach((io) => io?.disconnect());
+  }, []);
+
+  useEffect(() => {
+    const root = document.querySelector<HTMLElement>('.snap-main');
+    const finePointer = window.matchMedia('(min-width: 1024px) and (pointer: fine)');
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (!root || !finePointer.matches || reducedMotion.matches) return;
+
+    const scrollToSection = (direction: 1 | -1) => {
+      const currentIndex = Math.max(0, SECTIONS.findIndex((s) => s.id === activeRef.current));
+      const nextIndex = Math.min(SECTIONS.length - 1, Math.max(0, currentIndex + direction));
+      if (nextIndex === currentIndex) return;
+
+      const next = document.getElementById(SECTIONS[nextIndex].id);
+      if (!next) return;
+
+      wheelLockedRef.current = true;
+      root.scrollTo({ top: next.offsetTop, behavior: 'smooth' });
+      window.setTimeout(() => {
+        wheelLockedRef.current = false;
+      }, 760);
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) < 18) return;
+      event.preventDefault();
+      if (wheelLockedRef.current) return;
+      scrollToSection(event.deltaY > 0 ? 1 : -1);
+    };
+
+    root.addEventListener('wheel', onWheel, { passive: false });
+    return () => root.removeEventListener('wheel', onWheel);
   }, []);
 
   const go = (id: string) =>

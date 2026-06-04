@@ -22,7 +22,8 @@ export function isRegistryConfigured(): boolean {
  * Fetch all blob_ids registered for a user from the on-chain registry.
  * Returns empty array if the registry is not configured.
  */
-export async function getUserBlobIds(_userAddress: string): Promise<RegistryEntry[]> {
+export async function getUserBlobIds(userAddress: string): Promise<RegistryEntry[]> {
+  void userAddress;
   if (!isRegistryConfigured()) return [];
   // TODO: implement with @mysten/sui SDK once registry Move module is deployed
   return [];

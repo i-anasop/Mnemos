@@ -77,7 +77,7 @@ export default function StatusPills() {
         className="pill pill-ghost text-[11px] px-2.5 py-1 disabled:opacity-50"
         title="Run live health check"
       >
-        {busy ? 'Checking…' : 'Check'}
+        {busy ? 'Checking...' : 'Check'}
       </button>
     </div>
   );

@@ -8,6 +8,7 @@ export type MemoryBlobType =
 
 // Semantic category of a stored memory (independent of the structural blob type).
 export type MemoryType =
+  | 'profile_fact'
   | 'decision'
   | 'architecture'
   | 'research'
@@ -18,6 +19,40 @@ export type MemoryType =
   | 'constraint'
   | 'incident'
   | 'general';
+
+// Structured personal/profile facts extracted from "I am…", "my name is…", etc.
+export interface ProfileFacts {
+  name?: string;
+  role?: string;
+  education?: string;
+  current_focus?: string;
+  interests?: string[];
+  tech_stack?: string[];
+  [key: string]: string | string[] | undefined;
+}
+
+// ─── Profile Memory Layer ────────────────────────────────────────────────────
+// A stable, merged identity object maintained per (user_id, workspace_id).
+// This is the authoritative source for identity/profile recall — it does NOT
+// depend on fuzzy vector search or a Walrus read round-trip. Persisted locally
+// (data/profiles.json) AND mirrored to Walrus (durable, verifiable backup).
+export interface ProfileState {
+  name?: string;
+  role?: string;
+  education?: string;
+  interests: string[];
+  tech_stack: string[];
+  preferences: string[];
+  facts: string[];           // free-form durable facts ("currently building X")
+}
+
+export interface UserProfile {
+  user_id: string;
+  workspace_id: string;
+  profile: ProfileState;
+  updated_at: string;
+  source_blob_ids: string[]; // Walrus blob ids of the messages that built this
+}
 
 export interface MemoryBlob {
   schema_version: '1.0';
@@ -146,6 +181,7 @@ export interface MemoryDecision {
   summary?: string;
   reason: string;
   tags?: string[];
+  facts?: ProfileFacts;      // structured profile facts (name, role, tech_stack, …)
 }
 
 // What kind of reply the engine produced.

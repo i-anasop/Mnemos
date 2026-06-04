@@ -90,7 +90,7 @@ async function checkWalrus(): Promise<Check> {
     return {
       name: 'Walrus Store+Fetch',
       status: 'ok',
-      detail: `blob_id: ${blobId.slice(0, 16)}… verified`,
+      detail: `blob_id: ${blobId.slice(0, 16)}... verified`,
       ms: Date.now() - t,
     };
   } catch (err) {
@@ -112,7 +112,7 @@ async function checkMemoryIndex(): Promise<Check & { registry?: Record<string, {
       return {
         name: 'Memory Index',
         status: 'skip',
-        detail: 'No users in registry yet — create memories first',
+        detail: 'No users in registry yet; create memories first',
         registry: {},
       };
     }
@@ -136,7 +136,7 @@ async function checkMemoryIndex(): Promise<Check & { registry?: Record<string, {
     return {
       name: 'Memory Index (Walrus-backed)',
       status: allReachable ? 'ok' : 'fail',
-      detail: `${userIds.length} user(s), ${totalEntries} total memory blobs — all indexes reachable from Walrus`,
+      detail: `${userIds.length} user(s), ${totalEntries} total memory blobs; all indexes reachable from Walrus`,
       ms: Date.now() - t,
       registry,
     };
@@ -174,10 +174,10 @@ export async function GET() {
     checks,
     memory_registry: (memoryIndex as typeof memoryIndex & { registry?: unknown }).registry ?? {},
     env: {
-      GROQ_API_KEY: process.env.GROQ_API_KEY ? '✓ set' : '✗ missing',
-      GEMINI_API_KEY: process.env.GEMINI_API_KEY ? '✓ set' : '✗ missing (optional)',
-      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ? '✓ set' : '✗ missing (optional)',
-      VOYAGE_API_KEY: process.env.VOYAGE_API_KEY ? '✓ set' : '✗ missing',
+      GROQ_API_KEY: process.env.GROQ_API_KEY ? 'set' : 'missing',
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY ? 'set' : 'missing (optional)',
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ? 'set' : 'missing (optional)',
+      VOYAGE_API_KEY: process.env.VOYAGE_API_KEY ? 'set' : 'missing',
       WALRUS_PUBLISHER_URL: process.env.WALRUS_PUBLISHER_URL ?? '(default testnet)',
       WALRUS_AGGREGATOR_URL: process.env.WALRUS_AGGREGATOR_URL ?? '(default testnet)',
     },

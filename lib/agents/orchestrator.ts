@@ -1,9 +1,13 @@
 import { runResearcher } from './researcher';
 import { runSynthesizer } from './synthesizer';
 import { runConversationalReply } from './responder';
-import { triageMessage, decideMemory, decideMemoryFromMessage, keywordTags } from './memory-extractor';
+import { triageMessage, decideMemory, decideMemoryFromMessage, decideProfileFact, isIntentWithoutValue, isProfileQuery, attemptedNameIntro, keywordTags } from './memory-extractor';
 import { storeMemory, retrieveMemory } from '@/lib/walrus/memory';
 import type { ScoredEntry } from '@/lib/walrus/memory';
+import {
+  loadProfile, persistProfileLocal, saveProfile, mergeProfile, emptyProfile,
+  confirmProfileUpdate, answerProfileQuery, isEmptyProfile,
+} from '@/lib/profile/store';
 import { DEFAULT_WORKSPACE_ID, getWorkspace } from '@/lib/workspace';
 import type { AgentEvent, MemoryBlob, MemoryRetrieval, ResearchReport, SynthesisDocument } from '@/types';
 
@@ -149,7 +153,7 @@ export async function runOrchestrator(params: {
 
   // ── Casual: greeting / acknowledgement → quick reply, no memory, no store ──
   if (triage.mode === 'casual') {
-    const text = await runConversationalReply({ message: query, workspaceLabel });
+    const text = await runConversationalReply({ message: query, workspaceLabel, casual: true });
     emit({ event: 'casual_reply', text });
     emit({ event: 'memory_skipped', reason: triage.reason });
     emit({
@@ -162,15 +166,103 @@ export async function runOrchestrator(params: {
     return { casual: text };
   }
 
-  // ── Conversational: normal chat / meta / follow-up → memory-aware reply ────
+  // ── Conversational: normal chat / meta / follow-up / identity ─────────────
   if (triage.mode === 'conversational') {
+    // The stable profile object is the ground truth for identity. It's loaded
+    // from local-authoritative storage (no Walrus read), so recall is instant
+    // and reliable — independent of vector search and testnet flakiness.
+    const profile = await loadProfile(user_id, workspace_id).catch(() => null);
+
+    // ── (a) Storing path: the message states durable profile facts ──────────
+    const profileDecision = isIntentWithoutValue(query) ? null : decideProfileFact(query);
+    if (profileDecision?.facts) {
+      const facts = profileDecision.facts;
+
+      // Merge + persist LOCALLY first (instant) so the next turn ("who am I?")
+      // recalls it even before Walrus responds. This kills the recall race.
+      const existing = profile ?? emptyProfile(user_id, workspace_id);
+      let merged = mergeProfile(existing, facts);
+      await persistProfileLocal(merged);
+
+      // Deterministic confirmation — never an LLM, so it's always exactly right.
+      const reply = confirmProfileUpdate(facts);
+      emit({ event: 'memory_decision', decision: profileDecision });
+      emit({ event: 'casual_reply', text: reply });
+      emit({
+        event: 'session_complete',
+        summary: 'Profile updated.',
+        duration_ms: Date.now() - start,
+        reply_mode: 'casual',
+        casual: { text: reply },
+      });
+
+      // Durable artifact + Walrus mirror, AFTER the answer is already on screen.
+      emit({ event: 'memory_committing' });
+      let artifactBlobId: string | undefined;
+      try {
+        artifactBlobId = await storeWithRetry({
+          content: { statement: query, summary: profileDecision.summary, facts, confidence: profileDecision.importance },
+          type: 'session_snapshot',
+          tags: profileDecision.tags?.length ? profileDecision.tags : keywordTags(query),
+          session_id, user_id, workspace_id,
+          memory_type: 'profile_fact',
+          importance: profileDecision.importance,
+          summary: profileDecision.summary,
+        }, emit);
+      } catch {
+        // Walrus artifact write failed — the profile is still saved locally.
+      }
+      merged = mergeProfile(merged, {}, artifactBlobId);
+      const { walrusBlobId } = await saveProfile(merged);
+
+      const proof = artifactBlobId ?? walrusBlobId;
+      if (proof) {
+        emit({ event: 'memory_committed', blob_id: proof, type: 'profile', memory_type: 'profile_fact', importance: profileDecision.importance });
+      } else {
+        emit({ event: 'walrus_warning', message: 'Saved to your profile (local) — Walrus sync pending on testnet.' });
+      }
+      return { casual: reply, blob_id: proof };
+    }
+
+    // ── (b) Recall path: identity/profile question → answer from the object ──
+    if (isProfileQuery(query)) {
+      const reply = answerProfileQuery(profile, query);
+      if (!isEmptyProfile(profile)) emit({ event: 'memory_loaded', count: 1, session_id });
+      else emit({ event: 'memory_empty', session_id });
+      emit({ event: 'casual_reply', text: reply });
+      emit({
+        event: 'session_complete',
+        summary: 'Identity recall.',
+        duration_ms: Date.now() - start,
+        reply_mode: 'casual',
+        casual: { text: reply },
+      });
+      emit({ event: 'memory_skipped', reason: 'Recall question — retrieves profile, stores nothing.' });
+      return { casual: reply };
+    }
+
+    // ── (b2) Invalid name attempt: "my name is user/me" → reject deterministically
+    // (never let the LLM falsely claim it stored a placeholder name). ──────────
+    if (attemptedNameIntro(query)) {
+      const reply = "That doesn't look like a name I can store — what would you like me to call you?";
+      emit({ event: 'casual_reply', text: reply });
+      emit({
+        event: 'session_complete',
+        summary: 'Invalid name — not stored.',
+        duration_ms: Date.now() - start,
+        reply_mode: 'casual',
+        casual: { text: reply },
+      });
+      emit({ event: 'memory_skipped', reason: 'Invalid/placeholder name — not stored.' });
+      return { casual: reply };
+    }
+
+    // ── (c) General conversation: semantic memory + profile context → LLM ───
     let convoMemories: MemoryBlob[] = [];
     try {
-      // Lower threshold for conversation: personal facts ("my name is…") match
-      // questions ("do you know my name?") only weakly in embedding space.
       const { blobs, blobIds, scored } = await retrieveMemory({ query, user_id, top_k: 4, workspace_id, min_relevance: 0.22 });
+      convoMemories = blobs;
       if (blobs.length > 0) {
-        convoMemories = blobs;
         emit({ event: 'memory_loaded', count: blobs.length, session_id });
         const retrievals: MemoryRetrieval[] = blobs.map((blob, i) => ({
           blob_id: blobIds[i],
@@ -184,17 +276,15 @@ export async function runOrchestrator(params: {
           reason: buildRetrievalReason(scored[i].score, blob),
         }));
         emit({ event: 'memory_selected', retrievals });
-      } else {
+      } else if (isEmptyProfile(profile)) {
         emit({ event: 'memory_empty', session_id });
       }
     } catch {
       emit({ event: 'walrus_warning', message: 'Memory retrieval failed — replying without it' });
     }
 
-    const text = await runConversationalReply({ message: query, memories: convoMemories, workspaceLabel });
+    const text = await runConversationalReply({ message: query, memories: convoMemories, profile, workspaceLabel });
     emit({ event: 'casual_reply', text });
-
-    // Surface the answer immediately; assess + store the user's message after.
     emit({
       event: 'session_complete',
       summary: 'Conversational reply.',
@@ -203,8 +293,7 @@ export async function runOrchestrator(params: {
       casual: { text },
     });
 
-    // A conversational turn can still carry durable knowledge (decisions,
-    // preferences, "my name is…"). Judge the message itself and store if so.
+    // Assess the message for NON-profile durable knowledge (decisions, prefs…).
     const msgDecision = await decideMemoryFromMessage(query);
     emit({ event: 'memory_decision', decision: msgDecision });
     let convo_blob_id: string | undefined;
@@ -214,10 +303,8 @@ export async function runOrchestrator(params: {
         convo_blob_id = await storeWithRetry({
           content: { statement: query, summary: msgDecision.summary, confidence: msgDecision.importance },
           type: 'session_snapshot',
-          tags: msgDecision.tags && msgDecision.tags.length > 0 ? msgDecision.tags : keywordTags(query),
-          session_id,
-          user_id,
-          workspace_id,
+          tags: msgDecision.tags?.length ? msgDecision.tags : keywordTags(query),
+          session_id, user_id, workspace_id,
           memory_type: msgDecision.memory_type,
           importance: msgDecision.importance,
           summary: msgDecision.summary,

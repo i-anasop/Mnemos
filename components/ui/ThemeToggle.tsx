@@ -23,7 +23,19 @@ export default function ThemeToggle({ className = '' }: { className?: string }) 
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
-    setDark(document.documentElement.classList.contains('dark'));
+    const sync = () => setDark(document.documentElement.classList.contains('dark'));
+    const id = window.requestAnimationFrame(sync);
+    const observer = new MutationObserver(sync);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    window.addEventListener('storage', sync);
+    window.addEventListener('mnemos-theme-change', sync);
+
+    return () => {
+      window.cancelAnimationFrame(id);
+      observer.disconnect();
+      window.removeEventListener('storage', sync);
+      window.removeEventListener('mnemos-theme-change', sync);
+    };
   }, []);
 
   const toggle = () => {
@@ -34,6 +46,7 @@ export default function ThemeToggle({ className = '' }: { className?: string }) 
     } catch {
       /* ignore */
     }
+    window.dispatchEvent(new Event('mnemos-theme-change'));
     setDark(next);
   };
 

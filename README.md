@@ -57,6 +57,25 @@ On server restart:
   └── fetch VectorIndex      → Walrus aggregator ✓
 ```
 
+### Profile Memory Layer
+
+Identity facts (name, role, education, tech stack, interests) must **never** depend on fuzzy vector search — names embed as near-noise and a write→immediate-read on Walrus testnet routinely misses. So Mnemos keeps a dedicated, deterministic **profile object** per `(user_id, workspace_id)`:
+
+```
+"<workspace>::<user>" → {
+  profile: { name, role, education, interests[], tech_stack[], preferences[], facts[] },
+  updated_at, source_blob_ids[]
+}
+```
+
+- **Authoritative read path is local** (`data/profiles.json` + in-memory cache) → recall is instant and reliable, independent of testnet.
+- **Mirrored to Walrus** each update (durable, verifiable), with a pointer in `data/profile-registry.json` for rehydration if the local store is lost.
+- **Identity questions** ("who am I?", "what's my tech stack?") are answered **deterministically from the object** — never the LLM, so no hallucinated `"user"`.
+- **`isValidName` guard**: `user`, `me`, `myself`, empty, etc. are rejected and can never be stored as a name; a valid name always overrides a bad one on merge.
+- Profile facts are extracted by regex **before** the LLM curator, so the exact value (`Aura`, `Next.js`) is stored verbatim.
+
+Lives in [`lib/profile/store.ts`](lib/profile/store.ts). Run the live validation suite: `node scripts/profile-test.mjs`.
+
 ---
 
 ## Agent Feed — Live SSE Events
@@ -140,6 +159,8 @@ mnemos/
 │   │   ├── memory-extractor.ts # Triage + memory curator (store/skip decision)
 │   │   ├── researcher.ts     # Structured JSON reports (Zod-validated)
 │   │   └── synthesizer.ts    # Cross-session synthesis + confidence delta
+│   ├── profile/
+│   │   └── store.ts          # Profile Memory Layer — deterministic identity object
 │   ├── embeddings/
 │   │   ├── voyage.ts         # Voyage AI REST client
 │   │   └── search.ts         # Pure-JS cosine similarity + scored retrieval

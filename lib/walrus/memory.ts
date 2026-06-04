@@ -167,6 +167,26 @@ export async function retrieveMemory(params: {
   };
 }
 
+/**
+ * Returns all profile_fact memory blobs for a workspace, newest first —
+ * WITHOUT embedding search. Identity facts ("my name is…") embed as near-noise,
+ * so cosine retrieval misses them; these are always loaded directly so recall
+ * questions ("who am I?") can be answered reliably.
+ */
+export async function getProfileFacts(userId: string, workspaceId?: string): Promise<MemoryBlob[]> {
+  const { index } = await loadIndex(userId);
+  const ws = workspaceId ?? DEFAULT_WORKSPACE_ID;
+  const entries = index.entries
+    .filter(e => (e.workspace_id ?? DEFAULT_WORKSPACE_ID) === ws && e.memory_type === 'profile_fact')
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 8);
+
+  const fetched = await Promise.all(entries.map(async e => {
+    try { return await walrusFetchJSON<MemoryBlob>(e.blob_id); } catch { return null; }
+  }));
+  return fetched.filter((b): b is MemoryBlob => b !== null);
+}
+
 export async function getUserBlobMetadata(userId: string, workspaceId?: string): Promise<BlobMetadata[]> {
   const { index } = await loadIndex(userId);
   return index.entries

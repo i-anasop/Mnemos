@@ -15,7 +15,7 @@ export interface Workspace {
 }
 
 export const WORKSPACES: Workspace[] = [
-  { id: 'mnemos-demo', label: 'Mnemos Demo', description: 'Default memory context' },
+  { id: 'mnemos-demo', label: 'Mnemos Memory', description: 'Default memory context' },
 ];
 
 export function getWorkspace(id: string | undefined): Workspace {
