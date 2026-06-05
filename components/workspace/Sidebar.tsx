@@ -4,6 +4,7 @@ import Link from 'next/link';
 import Icon from '@/components/ui/Icon';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 import { MnemosLogo } from '@/components/ui/Logo';
+import { SuiDroplet, WalToken } from '@/components/ui/Brand';
 import ChatList from '@/components/workspace/ChatList';
 import type { IdentityMode } from '@/components/workspace/useIdentity';
 import type { Workspace } from '@/components/workspace/useWorkspaces';
@@ -20,13 +21,26 @@ interface SidebarProps {
   mode: IdentityMode;
   shortAddress: string | null;
   displayName: string;
+  pfp: string;
   onOpenProfile: () => void;
+}
+
+function Avatar({ pfp, mode, size = 32 }: { pfp: string; mode: IdentityMode; size?: number }) {
+  if (pfp) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={pfp} alt="avatar" className="rounded-full object-cover flex-shrink-0" style={{ width: size, height: size }} />;
+  }
+  return (
+    <span className={`rounded-full flex items-center justify-center flex-shrink-0 ${mode === 'wallet' ? 'grad-bg text-white' : 'bg-[var(--card)] border border-[var(--line)] text-[var(--muted)]'}`} style={{ width: size, height: size }}>
+      <Icon name={mode === 'wallet' ? 'wallet' : 'user'} size={Math.round(size * 0.5)} />
+    </span>
+  );
 }
 
 export default function Sidebar({
   open, onToggle, onNewChat,
   workspaces, activeId, onSwitchWorkspace, onRenameWorkspace, onDeleteWorkspace,
-  mode, shortAddress, displayName, onOpenProfile,
+  mode, shortAddress, displayName, pfp, onOpenProfile,
 }: SidebarProps) {
   const expanded = open;
   const identityLabel = mode === 'wallet' ? (shortAddress ?? 'Sui account') : 'Guest mode';
@@ -101,35 +115,40 @@ export default function Sidebar({
           )}
         </div>
 
-        {/* Profile footer */}
-        <div className="p-2.5 flex-shrink-0 border-t border-[var(--line)]">
+        {/* Profile footer + powered-by */}
+        <div className="p-2.5 flex-shrink-0 border-t border-[var(--line)] space-y-2">
           {expanded ? (
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={onOpenProfile}
-                className="group flex-1 min-w-0 flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-[var(--card)] transition-colors"
-              >
-                <span className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${mode === 'wallet' ? 'grad-bg text-white' : 'bg-[var(--card)] border border-[var(--line)] text-[var(--muted)]'}`}>
-                  <Icon name={mode === 'wallet' ? 'wallet' : 'user'} size={16} />
-                </span>
-                <span className="min-w-0 flex-1 text-left leading-tight">
-                  <span className="block text-[13px] font-semibold text-[var(--ink)] truncate">{displayName || (mode === 'wallet' ? 'Sui account' : 'Guest')}</span>
-                  <span className="block text-[11px] text-[var(--muted)] font-mono truncate">{identityLabel}</span>
-                </span>
-                <Icon name="settings" size={15} className="text-[var(--faint)] group-hover:text-[var(--ink)] transition-colors flex-shrink-0" />
-              </button>
-              <ThemeToggle />
-            </div>
+            <>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={onOpenProfile}
+                  className="group flex-1 min-w-0 flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-[var(--card)] transition-colors"
+                >
+                  <Avatar pfp={pfp} mode={mode} size={32} />
+                  <span className="min-w-0 flex-1 text-left leading-tight">
+                    <span className="block text-[13px] font-semibold text-[var(--ink)] truncate">{displayName || (mode === 'wallet' ? 'Sui account' : 'Guest')}</span>
+                    <span className="block text-[11px] text-[var(--muted)] font-mono truncate">{identityLabel}</span>
+                  </span>
+                  <Icon name="settings" size={15} className="text-[var(--faint)] group-hover:text-[var(--ink)] transition-colors flex-shrink-0" />
+                </button>
+                <ThemeToggle />
+              </div>
+              <div className="flex items-center justify-center gap-2 pt-0.5 text-[10px] font-medium text-[var(--faint)]">
+                <span>Powered by</span>
+                <span title="Walrus"><WalToken size={14} variant="color" /></span>
+                <span title="Sui"><SuiDroplet size={13} variant="blue" /></span>
+              </div>
+            </>
           ) : (
-            <div className="hidden md:flex flex-col items-center gap-2">
-              <button
-                onClick={onOpenProfile}
-                aria-label="Profile"
-                className={`w-9 h-9 rounded-full flex items-center justify-center ${mode === 'wallet' ? 'grad-bg text-white' : 'bg-[var(--card)] border border-[var(--line)] text-[var(--muted)]'}`}
-              >
-                <Icon name={mode === 'wallet' ? 'wallet' : 'user'} size={16} />
+            <div className="hidden md:flex flex-col items-center gap-2.5">
+              <button onClick={onOpenProfile} aria-label="Profile" className="rounded-full">
+                <Avatar pfp={pfp} mode={mode} size={36} />
               </button>
               <ThemeToggle />
+              <div className="flex flex-col items-center gap-1.5 pt-0.5">
+                <span title="Walrus"><WalToken size={16} variant="color" /></span>
+                <span title="Sui"><SuiDroplet size={14} variant="blue" /></span>
+              </div>
             </div>
           )}
         </div>

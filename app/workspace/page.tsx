@@ -13,6 +13,7 @@ import ThemeToggle from '@/components/ui/ThemeToggle';
 import { useIdentity } from '@/components/workspace/useIdentity';
 import { useWorkspaces } from '@/components/workspace/useWorkspaces';
 import ProfileModal from '@/components/workspace/ProfileModal';
+import MemoryModal from '@/components/workspace/MemoryModal';
 import { loadTranscript, saveTranscript } from '@/components/workspace/transcripts';
 import type { AgentEvent, BlobMetadata, SynthesisDocument } from '@/types';
 
@@ -42,12 +43,13 @@ export default function WorkspacePage() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [blobs, setBlobs] = useState<BlobMetadata[]>([]);
-  const [selectedBlobId, setSelectedBlobId] = useState<string | null>(null);
   const [blobDetail, setBlobDetail] = useState<BlobDetail | null>(null);
   const [isBlobsLoading, setIsBlobsLoading] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isMemoryOpen, setIsMemoryOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [displayName, setDisplayName] = useState('');
+  const [pfp, setPfp] = useState('');
   const justLoadedRef = useRef(false);
   const feedBottomRef = useRef<HTMLDivElement>(null);
 
@@ -80,7 +82,6 @@ export default function WorkspacePage() {
   // continuity) so the visible conversation never vanishes. New chats load empty.
   useEffect(() => {
     setBlobDetail(null);
-    setSelectedBlobId(null);
     if (!userId || !activeId) { setTurns([]); return; }
     justLoadedRef.current = true;
     setTurns(loadTranscript(userId, activeId));
@@ -92,15 +93,23 @@ export default function WorkspacePage() {
     if (userId && activeId) saveTranscript(userId, activeId, turns);
   }, [turns, userId, activeId]);
 
-  // Local display name, per user.
+  // Local display name + profile photo, per user.
   useEffect(() => {
-    if (!userId) { setDisplayName(''); return; }
-    try { setDisplayName(localStorage.getItem(`mnemos-name:${userId}`) || ''); } catch { setDisplayName(''); }
+    if (!userId) { setDisplayName(''); setPfp(''); return; }
+    try {
+      setDisplayName(localStorage.getItem(`mnemos-name:${userId}`) || '');
+      setPfp(localStorage.getItem(`mnemos-pfp:${userId}`) || '');
+    } catch { setDisplayName(''); setPfp(''); }
   }, [userId]);
 
   const handleChangeName = useCallback((name: string) => {
     setDisplayName(name);
     if (userId) { try { localStorage.setItem(`mnemos-name:${userId}`, name); } catch { /* ignore */ } }
+  }, [userId]);
+
+  const handleChangePfp = useCallback((dataUrl: string) => {
+    setPfp(dataUrl);
+    if (userId) { try { localStorage.setItem(`mnemos-pfp:${userId}`, dataUrl); } catch { /* ignore */ } }
   }, [userId]);
 
   useEffect(() => {
@@ -120,7 +129,7 @@ export default function WorkspacePage() {
   }, []);
 
   const handleBlobSelect = useCallback(async (blobId: string) => {
-    setSelectedBlobId(blobId);
+    setIsMemoryOpen(false);
     setIsProfileOpen(false);
     closeSidebarOnMobile();
     try {
@@ -144,7 +153,6 @@ export default function WorkspacePage() {
   }, [closeSidebarOnMobile]);
 
   const handleBackToList = useCallback(() => {
-    setSelectedBlobId(null);
     setBlobDetail(null);
   }, []);
 
@@ -267,6 +275,7 @@ export default function WorkspacePage() {
         mode={mode}
         shortAddress={shortAddress}
         displayName={displayName}
+        pfp={pfp}
         onOpenProfile={() => setIsProfileOpen(true)}
       />
 
@@ -345,12 +354,22 @@ export default function WorkspacePage() {
         shortAddress={shortAddress}
         displayName={displayName}
         onChangeName={handleChangeName}
+        pfp={pfp}
+        onChangePfp={handleChangePfp}
         workspaces={workspaces}
         activeId={activeId}
+        memoryCount={blobs.length}
+        onOpenMemory={() => { setIsMemoryOpen(true); void refreshBlobs(); }}
+      />
+
+      <MemoryModal
+        open={isMemoryOpen}
+        onClose={() => setIsMemoryOpen(false)}
         blobs={blobs}
-        selectedBlobId={selectedBlobId}
-        isBlobsLoading={isBlobsLoading}
-        onSelectBlob={handleBlobSelect}
+        isLoading={isBlobsLoading}
+        onRefresh={() => void refreshBlobs()}
+        onSelect={handleBlobSelect}
+        workspaceName={workspaces.find(w => w.id === activeId)?.name ?? 'this chat'}
       />
     </div>
   );
