@@ -187,6 +187,31 @@ export async function getProfileFacts(userId: string, workspaceId?: string): Pro
   return fetched.filter((b): b is MemoryBlob => b !== null);
 }
 
+/**
+ * Returns the blob_id of an existing memory that duplicates (workspace_id,
+ * memory_type, normalized summary) for this user, or null. Lets the caller skip
+ * a redundant Walrus write before it happens.
+ */
+export async function findDuplicateMemory(
+  userId: string,
+  workspaceId: string | undefined,
+  memoryType: MemoryType | undefined,
+  summary: string | undefined,
+): Promise<string | null> {
+  if (!summary) return null;
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').replace(/[.!?,;:]+$/, '').trim();
+  const target = norm(summary);
+  if (!target) return null;
+  const ws = workspaceId ?? DEFAULT_WORKSPACE_ID;
+  const { index } = await loadIndex(userId);
+  const hit = index.entries.find(e =>
+    (e.workspace_id ?? DEFAULT_WORKSPACE_ID) === ws &&
+    e.memory_type === memoryType &&
+    e.summary && norm(e.summary) === target,
+  );
+  return hit ? hit.blob_id : null;
+}
+
 export async function getUserBlobMetadata(userId: string, workspaceId?: string): Promise<BlobMetadata[]> {
   const { index } = await loadIndex(userId);
   return index.entries

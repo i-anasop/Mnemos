@@ -3,7 +3,7 @@ import { runSynthesizer } from './synthesizer';
 import { runConversationalReply } from './responder';
 import { triageMessage, decideMemory, decideMemoryFromMessage, isProfileQuery, attemptedNameIntro, keywordTags } from './memory-extractor';
 import { extractMemoryUpdate } from './structured-extractor';
-import { storeMemory, retrieveMemory } from '@/lib/walrus/memory';
+import { storeMemory, retrieveMemory, findDuplicateMemory } from '@/lib/walrus/memory';
 import type { ScoredEntry } from '@/lib/walrus/memory';
 import {
   loadProfile, persistProfileLocal, saveProfile, mergeMemoryUpdate, emptyProfile,
@@ -210,10 +210,22 @@ export async function runOrchestrator(params: {
       return { casual: reply };
     }
     if (hasMeaningfulUpdate(update)) {
-      // Merge + persist LOCALLY first (instant) so the next turn recalls it
-      // even before Walrus responds. This kills the recall race.
       const existing = profile ?? emptyProfile(user_id, workspace_id);
       const merged = mergeMemoryUpdate(existing, update);
+
+      // Duplicate protection: if merging changes nothing, the user is repeating
+      // a fact we already hold ("my name is Aura" → already Aura). Don't store a
+      // redundant copy or claim a fresh save.
+      if (JSON.stringify(merged.profile) === JSON.stringify(existing.profile)) {
+        const reply = 'I already remember that.';
+        emit({ event: 'casual_reply', text: reply });
+        emit({ event: 'session_complete', summary: 'Duplicate — already remembered.', duration_ms: Date.now() - start, reply_mode: 'casual', casual: { text: reply } });
+        emit({ event: 'memory_skipped', reason: 'duplicate memory' });
+        return { casual: reply };
+      }
+
+      // Merge + persist LOCALLY first (instant) so the next turn recalls it
+      // even before Walrus responds. This kills the recall race.
       await persistProfileLocal(merged);
 
       // Deterministic confirmation — never an LLM, so it's always exactly right.
@@ -296,7 +308,12 @@ export async function runOrchestrator(params: {
     const msgDecision = await decideMemoryFromMessage(query);
     emit({ event: 'memory_decision', decision: msgDecision });
     let convo_blob_id: string | undefined;
-    if (msgDecision.should_store) {
+    const convoDup = msgDecision.should_store
+      ? await findDuplicateMemory(user_id, workspace_id, msgDecision.memory_type, msgDecision.summary).catch(() => null)
+      : null;
+    if (msgDecision.should_store && convoDup) {
+      emit({ event: 'memory_skipped', reason: 'duplicate memory' });
+    } else if (msgDecision.should_store) {
       emit({ event: 'memory_committing' });
       try {
         convo_blob_id = await storeWithRetry({
@@ -411,7 +428,12 @@ export async function runOrchestrator(params: {
 
   // ── Phase 5: Persist (after the answer is already on screen) ──────────────
   let blob_id: string | undefined;
-  if (decision.should_store) {
+  const researchDup = decision.should_store
+    ? await findDuplicateMemory(user_id, workspace_id, decision.memory_type, decision.summary).catch(() => null)
+    : null;
+  if (decision.should_store && researchDup) {
+    emit({ event: 'memory_skipped', reason: 'duplicate memory' });
+  } else if (decision.should_store) {
     emit({ event: 'memory_committing' });
     try {
       blob_id = await storeWithRetry({

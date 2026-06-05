@@ -198,7 +198,7 @@ const PROFILE_QUERY = new RegExp(
   [
     'who\\s*(?:am|m)\\s*i',
     "what'?s my name", 'what is my name', 'what (?:was|were) my name',
-    '(?:do |did )?you (?:know|remember) (?:my name|me\\b)', 'know my name', 'remember my name', 'whats my name',
+    '(?:do |did )?you (?:know|remember) (?:my name|me\\b)', 'whats my name',
     'what do you (?:know|remember) about me', 'remember about me',
     'tell me (?:only )?(?:what|everything|all) you (?:actually )?(?:remember|know)',
     'tell me about (?:me|myself)', 'my profile', 'about me',

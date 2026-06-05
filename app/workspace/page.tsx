@@ -12,8 +12,9 @@ import { MnemosLogo } from '@/components/ui/Logo';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 import type { AgentEvent, BlobMetadata, SynthesisDocument } from '@/types';
 
-// Stable demo user ID — in production this comes from the connected Sui wallet
-const DEMO_USER_ID = 'demo-user-mnemos';
+// Stable demo user ID — in production this comes from the connected Sui wallet.
+// Fresh identity for clean manual testing.
+const DEMO_USER_ID = 'manual-test-user';
 
 interface BlobDetail {
   blob_id: string;
@@ -24,7 +25,7 @@ interface BlobDetail {
   importance?: number;
 }
 
-const WORKSPACE_ID = 'mnemos-demo';
+const WORKSPACE_ID = 'manual-test-workspace';
 
 export default function WorkspacePage() {
   const [turns, setTurns] = useState<Turn[]>([]);

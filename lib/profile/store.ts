@@ -173,12 +173,16 @@ export async function saveProfile(prof: UserProfile): Promise<{ walrusBlobId?: s
 const norm = (s: string) => s.trim().replace(/\s+/g, ' ');
 const lc = (s: string) => norm(s).toLowerCase();
 
+// Dedupe key: case-insensitive, whitespace-collapsed, trailing punctuation
+// stripped — so "Aura.", "aura" and "Aura" are the same fact.
+const keyOf = (s: string) => lc(s).replace(/[.!?,;:]+$/, '');
+
 function unionList(existing: string[], incoming: string[] = [], cap = 30): string[] {
-  const seen = new Set(existing.map(lc));
+  const seen = new Set(existing.map(keyOf));
   const out = [...existing];
   for (const item of incoming) {
     const t = norm(item);
-    if (t && !seen.has(lc(t))) { seen.add(lc(t)); out.push(t); }
+    if (t && !seen.has(keyOf(t))) { seen.add(keyOf(t)); out.push(t); }
   }
   return out.slice(0, cap);
 }
