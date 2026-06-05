@@ -2,48 +2,49 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { walrusStore, walrusFetchJSON } from '@/lib/walrus/client';
 import { DEFAULT_WORKSPACE_ID } from '@/lib/workspace';
-import type { ProfileFacts, ProfileState, UserProfile } from '@/types';
+import type { MemoryUpdate, ProfileState, ProjectFact, TechStack, UserProfile } from '@/types';
 
 /* ──────────────────────────────────────────────────────────────────────────
-   Profile Memory Layer.
+   Profile Memory Layer — structured, per-(user, workspace) memory.
 
-   A deterministic, per-(user_id, workspace_id) identity store. This is the
-   ground truth for "who am I / what's my name / my tech stack" — it does NOT
-   rely on vector similarity or a Walrus read round-trip (both of which miss
-   identity facts). Reads come from a local-authoritative cache + disk file;
-   Walrus is the durable, verifiable mirror (with a pointer for rehydration).
-
-   Persistence:
-   - data/profiles.json        → authoritative profile objects (survives restart)
-   - data/profile-registry.json → ws::user → latest Walrus profile blob id
-   - Walrus blob               → durable, content-addressed copy (proof + backup)
+   Ground truth for identity / projects / decisions / preferences. Recall is
+   deterministic (composed from this object), so it never depends on vector
+   search or a Walrus read. Persistence: local-authoritative (data/profiles.json
+   + cache), mirrored to Walrus (durable, verifiable) with a pointer for
+   rehydration if the local store is lost.
    ────────────────────────────────────────────────────────────────────────── */
 
 const PROFILES_PATH = path.join(process.cwd(), 'data', 'profiles.json');
 const POINTER_PATH = path.join(process.cwd(), 'data', 'profile-registry.json');
 
-// Authoritative in-memory cache (key → profile). Mirrors data/profiles.json.
 const cache = new Map<string, UserProfile>();
 let loaded = false;
 let writeChain: Promise<void> = Promise.resolve();
 
 const key = (userId: string, workspaceId: string) => `${workspaceId}::${userId}`;
 
-// ── Name validation — NEVER store these as a name ───────────────────────────
-const INVALID_NAMES = new Set([
+// ── Name validation — NEVER store these (per token, so "User My Actual" fails) ──
+const INVALID_NAME_TOKENS = new Set([
   'user', 'me', 'myself', 'i', 'you', 'him', 'her', 'them', 'someone', 'somebody',
   'anyone', 'anybody', 'nobody', 'unknown', 'anonymous', 'anon', 'admin', 'root',
-  'test', 'tester', 'guest', 'none', 'null', 'undefined', 'nan', 'n/a', 'na',
-  'human', 'person', 'bro', 'dude', 'man', 'bot', 'assistant', 'mnemos',
+  'test', 'tester', 'guest', 'none', 'null', 'undefined', 'nan', 'human', 'person',
+  'bro', 'dude', 'man', 'bot', 'assistant', 'mnemos', 'my', 'your', 'actual', 'real',
+  'full', 'legal', 'first', 'name', 'called', 'saying', 'not', 'the', 'a', 'an',
 ]);
 
+/** Valid only if EVERY token is a plausible name word (no "user", "my", …). */
 export function isValidName(raw?: string | null): boolean {
   if (!raw) return false;
-  const n = raw.trim().replace(/[.!?,;:]+$/, '').toLowerCase();
-  if (n.length < 2 || n.length > 40) return false;
-  if (INVALID_NAMES.has(n)) return false;
-  if (!/[a-z]/i.test(n)) return false;            // must contain a letter
-  if (/^(the|a|an)\b/.test(n)) return false;      // article-led junk
+  const cleaned = raw.trim().replace(/[.!?,;:]+$/, '');
+  if (cleaned.length < 2 || cleaned.length > 40) return false;
+  const tokens = cleaned.split(/\s+/);
+  if (tokens.length === 0 || tokens.length > 4) return false;
+  for (const t of tokens) {
+    const w = t.toLowerCase().replace(/[^a-z'’-]/g, '');
+    if (w.length < 1) return false;
+    if (INVALID_NAME_TOKENS.has(w)) return false;
+    if (!/^[a-z][a-z'’-]*$/.test(w)) return false;
+  }
   return true;
 }
 
@@ -51,316 +52,333 @@ export function emptyProfile(userId: string, workspaceId: string): UserProfile {
   return {
     user_id: userId,
     workspace_id: workspaceId,
-    profile: { interests: [], tech_stack: [], preferences: [], facts: [] },
+    profile: {
+      interests: [], current_focus: [],
+      tech_stack: { current_main: [], previous: [] },
+      projects: [], decisions: [], preferences: [],
+    },
     updated_at: new Date().toISOString(),
     source_blob_ids: [],
   };
 }
 
-/** True if the profile holds no usable identity data. */
 export function isEmptyProfile(p: UserProfile | null | undefined): boolean {
   const s = p?.profile;
   if (!s) return true;
   return (
     !isValidName(s.name) && !s.role && !s.education && !s.occupation &&
-    s.interests.length === 0 && s.tech_stack.length === 0 &&
-    s.preferences.length === 0 && s.facts.length === 0
+    s.interests.length === 0 && s.current_focus.length === 0 &&
+    s.tech_stack.current_main.length === 0 && s.tech_stack.previous.length === 0 &&
+    s.projects.length === 0 && s.decisions.length === 0 && s.preferences.length === 0
   );
 }
 
-// ── Disk I/O ─────────────────────────────────────────────────────────────────
-async function ensureLoaded(): Promise<void> {
-  if (loaded) return;
-  try {
-    const text = await fs.readFile(PROFILES_PATH, 'utf-8');
-    const disk = JSON.parse(text) as Record<string, UserProfile>;
-    for (const [k, v] of Object.entries(disk)) cache.set(k, normalize(v));
-  } catch {
-    // no file yet — start empty
-  }
-  loaded = true;
-}
-
-// Backfill any missing arrays / drop invalid stored names (legacy "user").
+// Backfill missing fields / drop legacy invalid names (so old data still loads).
 function normalize(p: UserProfile): UserProfile {
-  const s = p.profile ?? ({} as ProfileState);
+  const s = (p.profile ?? {}) as Partial<ProfileState> & Record<string, unknown>;
+  const ts = (s.tech_stack ?? {}) as Partial<TechStack>;
+  // Legacy shape had tech_stack as string[] — migrate it to current_main.
+  const legacyStack = Array.isArray(s.tech_stack) ? (s.tech_stack as unknown as string[]) : null;
   return {
     ...p,
     profile: {
       name: isValidName(s.name) ? s.name : undefined,
       role: s.role,
       education: s.education,
+      occupation: s.occupation,
       interests: s.interests ?? [],
-      tech_stack: s.tech_stack ?? [],
+      current_focus: s.current_focus ?? [],
+      tech_stack: {
+        current_main: legacyStack ?? ts.current_main ?? [],
+        previous: ts.previous ?? [],
+      },
+      projects: s.projects ?? [],
+      decisions: s.decisions ?? [],
       preferences: s.preferences ?? [],
-      facts: s.facts ?? [],
     },
     source_blob_ids: p.source_blob_ids ?? [],
   };
 }
 
+// ── Disk I/O ─────────────────────────────────────────────────────────────────
+async function ensureLoaded(): Promise<void> {
+  if (loaded) return;
+  try {
+    const disk = JSON.parse(await fs.readFile(PROFILES_PATH, 'utf-8')) as Record<string, UserProfile>;
+    for (const [k, v] of Object.entries(disk)) cache.set(k, normalize(v));
+  } catch { /* no file yet */ }
+  loaded = true;
+}
+
 async function flushDisk(): Promise<void> {
   const snapshot: Record<string, UserProfile> = {};
   for (const [k, v] of cache.entries()) snapshot[k] = v;
-  // Serialize writes so concurrent saves never interleave / corrupt the file.
   writeChain = writeChain.then(async () => {
     try {
       await fs.mkdir(path.dirname(PROFILES_PATH), { recursive: true });
       await fs.writeFile(PROFILES_PATH, JSON.stringify(snapshot, null, 2), 'utf-8');
-    } catch {
-      // Non-fatal: the in-memory cache still serves reads this session.
-    }
+    } catch { /* in-memory cache still serves reads */ }
   });
   return writeChain;
 }
 
 async function readPointers(): Promise<Record<string, string>> {
-  try {
-    return JSON.parse(await fs.readFile(POINTER_PATH, 'utf-8')) as Record<string, string>;
-  } catch {
-    return {};
-  }
+  try { return JSON.parse(await fs.readFile(POINTER_PATH, 'utf-8')) as Record<string, string>; }
+  catch { return {}; }
 }
-
 async function writePointer(userId: string, workspaceId: string, blobId: string): Promise<void> {
   try {
     const reg = await readPointers();
     reg[key(userId, workspaceId)] = blobId;
     await fs.mkdir(path.dirname(POINTER_PATH), { recursive: true });
     await fs.writeFile(POINTER_PATH, JSON.stringify(reg, null, 2), 'utf-8');
-  } catch {
-    // Non-fatal.
-  }
+  } catch { /* non-fatal */ }
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
-
-/**
- * Loads the stable profile for (user, workspace). Local-first (cache → disk).
- * If nothing is local but a Walrus pointer exists, rehydrates from Walrus.
- * Returns null only when there is genuinely no profile anywhere.
- */
-export async function loadProfile(
-  userId: string,
-  workspaceId: string = DEFAULT_WORKSPACE_ID,
-): Promise<UserProfile | null> {
+// ── Persistence API ───────────────────────────────────────────────────────────
+export async function loadProfile(userId: string, workspaceId: string = DEFAULT_WORKSPACE_ID): Promise<UserProfile | null> {
   await ensureLoaded();
   const k = key(userId, workspaceId);
-
   let prof = cache.get(k) ?? null;
-
   if (!prof) {
-    // Walrus-backed rehydration (e.g. local data/ was wiped but pointer survived).
-    const pointers = await readPointers();
-    const blobId = pointers[k];
+    const blobId = (await readPointers())[k];
     if (blobId) {
       try {
-        const remote = normalize(await walrusFetchJSON<UserProfile>(blobId));
-        cache.set(k, remote);
+        prof = normalize(await walrusFetchJSON<UserProfile>(blobId));
+        cache.set(k, prof);
         await flushDisk();
-        prof = remote;
-      } catch {
-        // Walrus unreachable — genuinely nothing to return.
-      }
+      } catch { /* Walrus unreachable */ }
     }
-  }
-
-  // Defensive: never surface a legacy invalid name ("user").
-  if (prof && prof.profile.name && !isValidName(prof.profile.name)) {
-    prof = normalize(prof);
-    cache.set(k, prof);
   }
   return prof;
 }
 
-/**
- * Persists a profile to the authoritative local store (in-memory cache + disk)
- * ONLY. Instant and reliable — call this BEFORE replying so recall in the very
- * next turn cannot race a slow Walrus write.
- */
 export async function persistProfileLocal(prof: UserProfile): Promise<void> {
   await ensureLoaded();
   cache.set(key(prof.user_id, prof.workspace_id), prof);
   await flushDisk();
 }
 
-/**
- * Persists a profile locally AND mirrors it to Walrus for durability.
- * Local write is authoritative (the basis for reliable recall); the Walrus
- * push is best-effort and reported via the returned blob id.
- */
 export async function saveProfile(prof: UserProfile): Promise<{ walrusBlobId?: string }> {
   await persistProfileLocal(prof);
-
   let walrusBlobId: string | undefined;
   try {
     walrusBlobId = await walrusStore(JSON.stringify(prof));
     if (walrusBlobId) await writePointer(prof.user_id, prof.workspace_id, walrusBlobId);
-  } catch {
-    // Walrus down — the local copy is already persisted; recall still works.
-  }
+  } catch { /* local copy persisted; recall still works */ }
   return { walrusBlobId };
 }
 
-function uniqMerge(existing: string[], incoming: string[]): string[] {
-  const seen = new Set(existing.map((s) => s.toLowerCase()));
+// ── Merge helpers ──────────────────────────────────────────────────────────────
+const norm = (s: string) => s.trim().replace(/\s+/g, ' ');
+const lc = (s: string) => norm(s).toLowerCase();
+
+function unionList(existing: string[], incoming: string[] = [], cap = 30): string[] {
+  const seen = new Set(existing.map(lc));
   const out = [...existing];
   for (const item of incoming) {
-    const t = item.trim();
-    if (t && !seen.has(t.toLowerCase())) {
-      seen.add(t.toLowerCase());
-      out.push(t);
-    }
+    const t = norm(item);
+    if (t && !seen.has(lc(t))) { seen.add(lc(t)); out.push(t); }
   }
-  return out.slice(0, 24);
+  return out.slice(0, cap);
 }
 
-/** Merges newly-extracted facts into an existing profile (pure). */
-export function mergeProfile(
-  existing: UserProfile,
-  facts: ProfileFacts,
-  sourceBlobId?: string,
-): UserProfile {
+function mergeTechStack(old: TechStack, u: MemoryUpdate): TechStack {
+  let main = [...old.current_main];
+  let prev = [...old.previous];
+
+  if (u.tech_stack_set_main?.length) {
+    const newMain = unionList([], u.tech_stack_set_main);
+    const dropped = main.filter(m => !newMain.some(n => lc(n) === lc(m)));
+    prev = unionList(prev, dropped);
+    main = newMain;
+  }
+  if (u.tech_stack_add?.length) {
+    main = unionList(main, u.tech_stack_add);
+  }
+  if (u.tech_stack_remove?.length) {
+    for (const r of u.tech_stack_remove) {
+      if (main.some(m => lc(m) === lc(r))) prev = unionList(prev, [norm(r)]);
+      main = main.filter(m => lc(m) !== lc(r));
+    }
+  }
+  // A tech can't be both current and previous.
+  prev = prev.filter(p => !main.some(m => lc(m) === lc(p)));
+  return { current_main: main.slice(0, 30), previous: prev.slice(0, 30) };
+}
+
+function mergeProjects(existing: ProjectFact[], incoming: ProjectFact[] = []): ProjectFact[] {
+  const out = existing.map(p => ({ ...p }));
+  for (const p of incoming) {
+    const name = norm(p.name || '');
+    if (!name) continue;
+    const found = out.find(e => lc(e.name) === lc(name));
+    if (found) {
+      if (p.role) found.role = norm(p.role);
+      if (p.context) found.context = norm(p.context);
+    } else {
+      out.push({ name, role: p.role ? norm(p.role) : undefined, context: p.context ? norm(p.context) : undefined });
+    }
+  }
+  return out.slice(0, 20);
+}
+
+/** Applies a structured MemoryUpdate to a profile (pure). */
+export function mergeMemoryUpdate(existing: UserProfile, u: MemoryUpdate, sourceBlobId?: string): UserProfile {
+  const p = existing.profile;
   const next: ProfileState = {
-    ...existing.profile,
-    interests: [...existing.profile.interests],
-    tech_stack: [...existing.profile.tech_stack],
-    preferences: [...existing.profile.preferences],
-    facts: [...existing.profile.facts],
+    name: p.name, role: p.role, education: p.education, occupation: p.occupation,
+    interests: [...p.interests], current_focus: [...p.current_focus],
+    tech_stack: { current_main: [...p.tech_stack.current_main], previous: [...p.tech_stack.previous] },
+    projects: p.projects.map(x => ({ ...x })),
+    decisions: [...p.decisions], preferences: [...p.preferences],
   };
 
-  // Name: only a VALID name overrides — discards any legacy "user" forever.
-  if (isValidName(facts.name)) next.name = facts.name!.trim().replace(/[.!?,;:]+$/, '');
-  if (typeof facts.role === 'string' && facts.role.trim()) next.role = facts.role.trim();
-  if (typeof facts.education === 'string' && facts.education.trim()) next.education = facts.education.trim();
-  if (typeof facts.occupation === 'string' && facts.occupation.trim()) next.occupation = facts.occupation.trim();
-  if (facts.interests?.length) next.interests = uniqMerge(next.interests, facts.interests);
-  if (facts.tech_stack?.length) next.tech_stack = uniqMerge(next.tech_stack, facts.tech_stack);
-  if (typeof facts.current_focus === 'string' && facts.current_focus.trim()) {
-    next.facts = uniqMerge(next.facts, [`currently: ${facts.current_focus.trim()}`]);
+  if (isValidName(u.name)) next.name = norm(u.name!);
+  if (typeof u.role === 'string' && u.role.trim()) next.role = norm(u.role);
+  if (typeof u.education === 'string' && u.education.trim()) next.education = norm(u.education);
+  if (typeof u.occupation === 'string' && u.occupation.trim()) next.occupation = norm(u.occupation);
+  if (u.interests?.length) next.interests = unionList(next.interests, u.interests);
+  if (u.current_focus?.length) next.current_focus = unionList(next.current_focus, u.current_focus);
+  if (u.tech_stack_set_main?.length || u.tech_stack_add?.length || u.tech_stack_remove?.length) {
+    next.tech_stack = mergeTechStack(next.tech_stack, u);
   }
-  // Any extra string keys → durable free-form facts.
-  for (const [k, v] of Object.entries(facts)) {
-    if (['name', 'role', 'education', 'occupation', 'current_focus', 'interests', 'tech_stack'].includes(k)) continue;
-    if (typeof v === 'string' && v.trim()) next.facts = uniqMerge(next.facts, [`${k.replace(/_/g, ' ')}: ${v.trim()}`]);
-  }
+  if (u.projects?.length) next.projects = mergeProjects(next.projects, u.projects);
+  if (u.decisions?.length) next.decisions = unionList(next.decisions, u.decisions, 20);
+  if (u.preferences?.length) next.preferences = unionList(next.preferences, u.preferences, 20);
 
   return {
     ...existing,
     profile: next,
     updated_at: new Date().toISOString(),
-    source_blob_ids: sourceBlobId
-      ? uniqMerge(existing.source_blob_ids, [sourceBlobId])
-      : existing.source_blob_ids,
+    source_blob_ids: sourceBlobId ? unionList(existing.source_blob_ids, [sourceBlobId]) : existing.source_blob_ids,
   };
 }
 
-/** Load → merge facts → persist. Returns the merged profile + whether it changed. */
-export async function updateProfileWithFacts(params: {
-  user_id: string;
-  workspace_id: string;
-  facts: ProfileFacts;
-  source_blob_id?: string;
-}): Promise<{ profile: UserProfile; changed: boolean; walrusBlobId?: string }> {
-  const { user_id, workspace_id, facts, source_blob_id } = params;
-  const existing = (await loadProfile(user_id, workspace_id)) ?? emptyProfile(user_id, workspace_id);
-  const merged = mergeProfile(existing, facts, source_blob_id);
-  const changed = JSON.stringify(merged.profile) !== JSON.stringify(existing.profile);
-  const { walrusBlobId } = await saveProfile(merged);
-  return { profile: merged, changed, walrusBlobId };
+/** True if the update carries at least one durable fact worth storing. */
+export function hasMeaningfulUpdate(u: MemoryUpdate): boolean {
+  return Boolean(
+    isValidName(u.name) || u.role || u.education || u.occupation ||
+    u.interests?.length || u.current_focus?.length ||
+    u.tech_stack_set_main?.length || u.tech_stack_add?.length || u.tech_stack_remove?.length ||
+    u.projects?.length || u.decisions?.length || u.preferences?.length,
+  );
 }
 
-// ── Deterministic natural-language helpers ──────────────────────────────────
-function article(word: string): string {
-  return /^[aeiou]/i.test(word.trim()) ? 'an' : 'a';
-}
-
+// ── Natural language ────────────────────────────────────────────────────────
+function article(w: string): string { return /^[aeiou]/i.test(w.trim()) ? 'an' : 'a'; }
 function naturalList(items: string[]): string {
   if (items.length === 0) return '';
   if (items.length === 1) return items[0];
   if (items.length === 2) return `${items[0]} and ${items[1]}`;
   return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
 }
+function projectPhrase(p: ProjectFact): string {
+  const ctx = (p.context || '').replace(/^for\s+/i, '').trim();
+  const bits = [p.role, ctx].filter(Boolean);
+  return bits.length ? `${p.name} (${bits.join(', ')})` : p.name;
+}
 
-/** A short confirmation after storing profile facts (no LLM — always correct). */
-export function confirmProfileUpdate(facts: ProfileFacts): string {
+/** Deterministic confirmation of what was just stored (no LLM → always right). */
+export function confirmMemoryUpdate(u: MemoryUpdate, merged: UserProfile): string {
+  const s = merged.profile;
   const parts: string[] = [];
-  if (isValidName(facts.name)) parts.push(`your name is ${facts.name!.trim()}`);
-  const roleStr = facts.education || facts.role;
-  if (roleStr) parts.push(`you're ${article(roleStr)} ${roleStr}`);
-  if (facts.occupation) parts.push(`you work in ${facts.occupation}`);
-  if (facts.tech_stack?.length) parts.push(`your tech stack is ${naturalList(facts.tech_stack)}`);
-  if (facts.interests?.length) parts.push(`you're into ${naturalList(facts.interests)}`);
-  if (facts.current_focus) parts.push(`you're focused on ${facts.current_focus}`);
+  if (isValidName(u.name)) parts.push(`you're ${s.name}`);
+  const roleStr = u.education || u.role || u.occupation;
+  if (roleStr) parts.push(`${article(String(roleStr))} ${roleStr}`);
+  if (u.interests?.length) parts.push(`into ${naturalList(u.interests)}`);
+  if (u.tech_stack_set_main?.length || u.tech_stack_add?.length || u.tech_stack_remove?.length) {
+    parts.push(`your main stack is now ${naturalList(s.tech_stack.current_main)}`);
+  }
+  if (u.projects?.length) parts.push(`you're building ${naturalList(u.projects.map(p => p.name))}`);
+  if (u.decisions?.length) parts.push(`the decision: ${u.decisions[0]}`);
+  if (u.preferences?.length) parts.push(`your preference: ${u.preferences[0]}`);
   if (parts.length === 0) return `Got it — I'll remember that.`;
   return `Got it — ${naturalList(parts)}. I'll remember that.`;
 }
 
 /**
- * Deterministically answers an identity/profile question from the stable
- * profile object. Never hallucinates "user"; says plainly when a field is
- * not stored. This is the recall path for who-am-I style questions.
+ * Composed recall — answers identity / project / decision / stack questions
+ * deterministically from the profile object. Combines categories for compound
+ * questions ("who am I, what am I building, what did we decide?"). Never
+ * fabricates and never says "user".
  */
 export function answerProfileQuery(profile: UserProfile | null, query: string): string {
-  const s = profile?.profile;
-  const name = isValidName(s?.name) ? s!.name : undefined;
-  const roleStr = s?.education || s?.role;
-
   if (isEmptyProfile(profile)) {
     return "I don't know yet — tell me your name, or what you'd like me to remember about you.";
   }
-
+  const s = profile!.profile;
+  const name = isValidName(s.name) ? s.name : undefined;
   const q = query.toLowerCase();
-  const aboutMe = /(about me|know about me|who am i|tell me about (me|myself)|my profile)/.test(q);
-  const wantsName = aboutMe || /\bname\b|who am i|remember me|do you know me/.test(q);
-  const wantsDoes = aboutMe || /\b(what (do|am) i (do|doing)|do i do|occupation|profession|my job|my work|my field|work (on|in))\b/.test(q);
-  const wantsRole = wantsDoes || /\b(role|student|study|studying)\b/.test(q) || /who am i/.test(q);
-  const wantsStack = aboutMe || /\b(tech ?stack|stack|technolog|what do i (use|code|build)|languages?|tools?)\b/.test(q);
-  const wantsInterests = aboutMe || /\b(interest|interested|into|like|love|passion)\b/.test(q);
 
-  const sentences: string[] = [];
+  const all = /(about me|know about me|remember about me|tell me (everything|all|what)|what do you (know|remember)|who am i|my profile|everything)/.test(q);
+  const wantName = all || /\bname\b|who am i|remember me/.test(q);
+  const wantRole = all || /\b(role|student|study|studying|occupation|profession|job)\b/.test(q) || /who am i/.test(q);
+  const wantFocus = all || /\b(focus|focused|interest|interested|into|working on)\b/.test(q) || /who am i/.test(q);
+  const wantStack = all || /\b(tech ?stack|stack|technolog|languages?|tools?)\b/.test(q);
+  const wantProjects = all || /\b(build|building|project|projects|working on|making|product)\b/.test(q);
+  const wantDecisions = all || /\b(decide|decided|decision|decisions)\b/.test(q);
+  const wantPrefs = all || /\b(prefer|preference|preferences|rule|rules)\b/.test(q);
 
-  if (wantsName) {
-    if (name) sentences.push(`You are ${name}.`);
-    else sentences.push(`I don't have your name stored yet.`);
-  }
-  if (wantsRole && roleStr) sentences.push(`You told me you're ${article(roleStr)} ${roleStr}.`);
-  if (wantsDoes) {
-    if (s!.occupation) sentences.push(`You work in ${s!.occupation}.`);
-    else if (!roleStr && !aboutMe) sentences.push(`I don't have what you do stored yet — tell me and I'll remember.`);
-  }
-  if (wantsStack) {
-    if (s!.tech_stack.length) sentences.push(`Your tech stack is ${naturalList(s!.tech_stack)}.`);
-    else if (!aboutMe) sentences.push(`I don't have your tech stack stored yet.`);
-  }
-  if (wantsInterests && s!.interests.length) sentences.push(`You're into ${naturalList(s!.interests)}.`);
-  if (aboutMe && s!.facts.length) sentences.push(s!.facts.join('; ') + '.');
+  const out: string[] = [];
 
-  // Fallback: question matched nothing specific — give the identity we know.
-  if (sentences.length === 0) {
-    if (name) sentences.push(`You are ${name}.`);
-    if (roleStr) sentences.push(`You're ${article(roleStr)} ${roleStr}.`);
-    if (s!.occupation) sentences.push(`You work in ${s!.occupation}.`);
-    if (s!.tech_stack.length) sentences.push(`Your tech stack is ${naturalList(s!.tech_stack)}.`);
-    if (s!.interests.length) sentences.push(`You're into ${naturalList(s!.interests)}.`);
+  // identity
+  const idBits: string[] = [];
+  if (wantName && name) idBits.push(name);
+  const roleStr = s.education || s.role;
+  if (wantRole && (roleStr || s.occupation)) {
+    const r = roleStr ? `${article(roleStr)} ${roleStr}` : `working in ${s.occupation}`;
+    idBits.push(r);
+  }
+  if (idBits.length) out.push(`You are ${idBits.join(', ')}.`);
+  else if (wantName && !name) out.push(`I don't have your name stored yet.`);
+
+  const focus = wantFocus ? unionList(s.interests, s.current_focus) : [];
+  if (focus.length) out.push(`You're focused on ${naturalList(focus)}.`);
+
+  if (wantProjects && s.projects.length) {
+    out.push(`You're building ${naturalList(s.projects.map(projectPhrase))}.`);
+  }
+  if (wantDecisions && s.decisions.length) {
+    out.push(`${s.decisions.length === 1 ? 'We decided' : 'Decisions so far:'} ${naturalList(s.decisions)}.`);
+  }
+  if (wantStack) {
+    if (s.tech_stack.current_main.length) {
+      out.push(`Your current main tech stack is ${naturalList(s.tech_stack.current_main)}.`);
+      if ((all || /\b(previous|old|dropped|before)\b/.test(q)) && s.tech_stack.previous.length) {
+        out.push(`Previously: ${naturalList(s.tech_stack.previous)}.`);
+      }
+    } else if (!all) out.push(`I don't have your tech stack stored yet.`);
+  }
+  if (wantPrefs && s.preferences.length && all) {
+    out.push(`Your preferences: ${naturalList(s.preferences)}.`);
   }
 
-  return sentences.join(' ').trim() ||
+  if (out.length === 0) {
+    // Question matched no category we have → fall back to the identity we know.
+    if (name) out.push(`You are ${name}${roleStr ? `, ${article(roleStr)} ${roleStr}` : ''}.`);
+    if (s.projects.length) out.push(`You're building ${naturalList(s.projects.map(p => p.name))}.`);
+  }
+
+  return out.join(' ').trim() ||
     "I don't know yet — tell me your name, or what you'd like me to remember about you.";
 }
 
 /** Renders the profile as authoritative context lines for the LLM responder. */
 export function profileToContext(profile: UserProfile | null): string | null {
-  const s = profile?.profile;
-  if (isEmptyProfile(profile) || !s) return null;
+  if (isEmptyProfile(profile)) return null;
+  const s = profile!.profile;
   const lines: string[] = [];
   if (isValidName(s.name)) lines.push(`  · name = ${s.name}`);
   if (s.role) lines.push(`  · role = ${s.role}`);
   if (s.education) lines.push(`  · education = ${s.education}`);
   if (s.occupation) lines.push(`  · works in = ${s.occupation}`);
-  if (s.tech_stack.length) lines.push(`  · tech stack = ${s.tech_stack.join(', ')}`);
   if (s.interests.length) lines.push(`  · interests = ${s.interests.join(', ')}`);
-  if (s.preferences.length) lines.push(`  · preferences = ${s.preferences.join(', ')}`);
-  for (const f of s.facts) lines.push(`  · ${f}`);
+  if (s.current_focus.length) lines.push(`  · current focus = ${s.current_focus.join(', ')}`);
+  if (s.tech_stack.current_main.length) lines.push(`  · main tech stack = ${s.tech_stack.current_main.join(', ')}`);
+  if (s.tech_stack.previous.length) lines.push(`  · previous tech = ${s.tech_stack.previous.join(', ')}`);
+  for (const p of s.projects) lines.push(`  · project: ${projectPhrase(p)}`);
+  for (const d of s.decisions) lines.push(`  · decision: ${d}`);
+  for (const pref of s.preferences) lines.push(`  · preference: ${pref}`);
   return lines.length ? `- USER PROFILE (verified, stored):\n${lines.join('\n')}` : null;
 }

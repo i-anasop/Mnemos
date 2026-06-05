@@ -1,12 +1,13 @@
 import { runResearcher } from './researcher';
 import { runSynthesizer } from './synthesizer';
 import { runConversationalReply } from './responder';
-import { triageMessage, decideMemory, decideMemoryFromMessage, decideProfileFact, isIntentWithoutValue, isProfileQuery, attemptedNameIntro, keywordTags } from './memory-extractor';
+import { triageMessage, decideMemory, decideMemoryFromMessage, isProfileQuery, attemptedNameIntro, keywordTags } from './memory-extractor';
+import { extractMemoryUpdate } from './structured-extractor';
 import { storeMemory, retrieveMemory } from '@/lib/walrus/memory';
 import type { ScoredEntry } from '@/lib/walrus/memory';
 import {
-  loadProfile, persistProfileLocal, saveProfile, mergeProfile, emptyProfile,
-  confirmProfileUpdate, answerProfileQuery, isEmptyProfile,
+  loadProfile, persistProfileLocal, saveProfile, mergeMemoryUpdate, emptyProfile,
+  confirmMemoryUpdate, answerProfileQuery, isEmptyProfile, hasMeaningfulUpdate,
 } from '@/lib/profile/store';
 import { DEFAULT_WORKSPACE_ID, getWorkspace } from '@/lib/workspace';
 import type { AgentEvent, ChatMessage, MemoryBlob, MemoryRetrieval, ResearchReport, SynthesisDocument } from '@/types';
@@ -180,45 +181,8 @@ export async function runOrchestrator(params: {
     // and reliable — independent of vector search and testnet flakiness.
     const profile = await loadProfile(user_id, workspace_id).catch(() => null);
 
-    // ── (a) Storing path: the message states durable profile facts ──────────
-    const profileDecision = isIntentWithoutValue(query, { askedForName }) ? null : decideProfileFact(query, { askedForName });
-    if (profileDecision?.facts) {
-      const facts = profileDecision.facts;
-
-      // Merge + persist LOCALLY first (instant) so the next turn ("who am I?")
-      // recalls it even before Walrus responds. This kills the recall race.
-      const existing = profile ?? emptyProfile(user_id, workspace_id);
-      const merged = mergeProfile(existing, facts);
-      await persistProfileLocal(merged);
-
-      // Deterministic confirmation — never an LLM, so it's always exactly right.
-      const reply = confirmProfileUpdate(facts);
-      emit({ event: 'memory_decision', decision: profileDecision });
-      emit({ event: 'casual_reply', text: reply });
-      emit({
-        event: 'session_complete',
-        summary: 'Profile updated.',
-        duration_ms: Date.now() - start,
-        reply_mode: 'casual',
-        casual: { text: reply },
-      });
-
-      // Mirror the profile object to Walrus, AFTER the answer is on screen.
-      // Profile facts are recalled deterministically, so we do NOT embed/index
-      // them (saves scarce embedding quota for decisions/research). The Walrus
-      // copy of the profile object is the durable artifact + the saved proof.
-      emit({ event: 'memory_committing' });
-      const { walrusBlobId } = await saveProfile(merged);
-
-      if (walrusBlobId) {
-        emit({ event: 'memory_committed', blob_id: walrusBlobId, type: 'profile', memory_type: 'profile_fact', importance: profileDecision.importance });
-      } else {
-        emit({ event: 'walrus_warning', message: 'Saved to your profile (local) — Walrus sync pending on testnet.' });
-      }
-      return { casual: reply, blob_id: walrusBlobId };
-    }
-
-    // ── (b) Recall path: identity/profile question → answer from the object ──
+    // ── (a) Recall path: identity / project / decision question → compose ────
+    // from the structured profile object (deterministic, never hallucinated).
     if (isProfileQuery(query)) {
       const reply = answerProfileQuery(profile, query);
       if (!isEmptyProfile(profile)) emit({ event: 'memory_loaded', count: 1, session_id });
@@ -226,13 +190,54 @@ export async function runOrchestrator(params: {
       emit({ event: 'casual_reply', text: reply });
       emit({
         event: 'session_complete',
-        summary: 'Identity recall.',
+        summary: 'Memory recall.',
         duration_ms: Date.now() - start,
         reply_mode: 'casual',
         casual: { text: reply },
       });
-      emit({ event: 'memory_skipped', reason: 'Recall question — retrieves profile, stores nothing.' });
+      emit({ event: 'memory_skipped', reason: 'Recall question — composes from memory, stores nothing.' });
       return { casual: reply };
+    }
+
+    // ── (b) Storing path: structured multi-fact extraction ──────────────────
+    const update = await extractMemoryUpdate(query);
+    if (update.is_recall_question && !hasMeaningfulUpdate(update)) {
+      const reply = answerProfileQuery(profile, query);
+      if (!isEmptyProfile(profile)) emit({ event: 'memory_loaded', count: 1, session_id });
+      emit({ event: 'casual_reply', text: reply });
+      emit({ event: 'session_complete', summary: 'Memory recall.', duration_ms: Date.now() - start, reply_mode: 'casual', casual: { text: reply } });
+      emit({ event: 'memory_skipped', reason: 'Recall question — composes from memory, stores nothing.' });
+      return { casual: reply };
+    }
+    if (hasMeaningfulUpdate(update)) {
+      // Merge + persist LOCALLY first (instant) so the next turn recalls it
+      // even before Walrus responds. This kills the recall race.
+      const existing = profile ?? emptyProfile(user_id, workspace_id);
+      const merged = mergeMemoryUpdate(existing, update);
+      await persistProfileLocal(merged);
+
+      // Deterministic confirmation — never an LLM, so it's always exactly right.
+      const reply = confirmMemoryUpdate(update, merged);
+      emit({ event: 'casual_reply', text: reply });
+      emit({
+        event: 'session_complete',
+        summary: 'Memory updated.',
+        duration_ms: Date.now() - start,
+        reply_mode: 'casual',
+        casual: { text: reply },
+      });
+
+      // Mirror the profile object to Walrus (durable, verifiable) — the saved
+      // proof. Structured facts are recalled deterministically, so we don't
+      // embed them (saves embedding quota for research/semantic memory).
+      emit({ event: 'memory_committing' });
+      const { walrusBlobId } = await saveProfile(merged);
+      if (walrusBlobId) {
+        emit({ event: 'memory_committed', blob_id: walrusBlobId, type: 'profile', memory_type: 'profile_fact', importance: 0.95 });
+      } else {
+        emit({ event: 'walrus_warning', message: 'Saved to your memory (local) — Walrus sync pending on testnet.' });
+      }
+      return { casual: reply, blob_id: walrusBlobId };
     }
 
     // ── (b2) Invalid name attempt: "my name is user/me" → reject deterministically

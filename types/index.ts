@@ -43,15 +43,28 @@ export interface ChatMessage {
 // This is the authoritative source for identity/profile recall — it does NOT
 // depend on fuzzy vector search or a Walrus read round-trip. Persisted locally
 // (data/profiles.json) AND mirrored to Walrus (durable, verifiable backup).
+export interface TechStack {
+  current_main: string[];    // the user's active main stack
+  previous: string[];        // tech they dropped / no longer use as main
+}
+
+export interface ProjectFact {
+  name: string;
+  role?: string;             // what it is / what the user does on it
+  context?: string;          // purpose / event ("Sui Overflow", "memory engine")
+}
+
 export interface ProfileState {
   name?: string;
   role?: string;
   education?: string;
   occupation?: string;       // "what I do" — field/work ("artificial intelligence")
   interests: string[];
-  tech_stack: string[];
+  current_focus: string[];
+  tech_stack: TechStack;
+  projects: ProjectFact[];
+  decisions: string[];
   preferences: string[];
-  facts: string[];           // free-form durable facts ("currently building X")
 }
 
 export interface UserProfile {
@@ -60,6 +73,25 @@ export interface UserProfile {
   profile: ProfileState;
   updated_at: string;
   source_blob_ids: string[]; // Walrus blob ids of the messages that built this
+}
+
+// The structured, multi-fact output of the memory extractor. Describes the
+// UPDATE to apply to a profile (so corrections like "remove Python" work),
+// not just a flat set of facts.
+export interface MemoryUpdate {
+  name?: string | null;
+  role?: string | null;
+  education?: string | null;
+  occupation?: string | null;
+  interests?: string[];
+  current_focus?: string[];
+  tech_stack_set_main?: string[];  // full replacement of the main stack
+  tech_stack_add?: string[];
+  tech_stack_remove?: string[];
+  projects?: ProjectFact[];
+  decisions?: string[];
+  preferences?: string[];
+  is_recall_question?: boolean;    // true = asking to recall, store nothing
 }
 
 export interface MemoryBlob {

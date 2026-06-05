@@ -32,6 +32,10 @@ export interface Triage {
 // Explicit deep-research / analysis intent → run the multi-agent pipeline.
 const RESEARCH_INTENT = /\b(research|analy[sz]e?|analysis|investigat\w*|deep[\s-]?dive|compare|comparison|evaluate|assessment|strateg\w*|in[\s-]?depth|comprehensive|report on|study|breakdown|pros and cons|risks? of|implications? of|frameworks? for|landscape of)\b/i;
 
+// First-person personal / memory statements — these go to the memory engine,
+// never the research pipeline, even when they contain a research-ish word.
+const PERSONAL_STATEMENT = /\b(my name is|my (?:real|actual|full|legal) name|call me\b|my (?:tech ?stack|main stack|stack|role|project|preference)|we (?:decided|agreed|chose)|remember (?:that|this)\b|don'?t (?:store|remember|forget)|i (?:study|studying|major in)|i'?m (?:studying|building|working on|called)|i am (?:studying|building|working on|called|an?\b)|i work (?:on|in|with)|i'?m an? \w|update my (?:stack|tech)|forget \w+ from|remove \w+ from)/i;
+
 /**
  * Fast heuristic router. Three lanes:
  *  - casual:        greetings / acknowledgements → quick reply, no memory, no store
@@ -49,6 +53,13 @@ export function triageMessage(message: string): Triage {
 
   for (const re of CASUAL_PATTERNS) {
     if (re.test(text)) return { mode: 'casual', reason: 'Casual greeting or acknowledgement.' };
+  }
+
+  // Personal / memory statements are NEVER research — even if they contain a
+  // research-ish word ("I study X", "analyse my stack"). They feed the memory
+  // engine, not the multi-agent pipeline.
+  if (PERSONAL_STATEMENT.test(text)) {
+    return { mode: 'conversational', reason: 'Personal / memory statement — feed the memory engine.' };
   }
 
   // Explicit research intent, and enough substance to be worth the pipeline.
@@ -183,7 +194,24 @@ function isRecallOnly(message: string): boolean {
 
 // Identity / profile questions → answered from the Profile Memory Layer, never
 // from fuzzy vector search. "who am I", "what's my name", "my tech stack", …
-const PROFILE_QUERY = /\b(who\s*(?:am|m)\s*i|what'?s my name|what is my name|what (?:was|were) my name|(?:do |did )?you (?:know|remember) (?:my name|me\b)|know my name|remember my name|whats my name|what do you know about me|tell me about (?:me|myself)|what'?s my (?:tech ?stack|stack|role|job|profession|occupation|field|work)|what (?:do|am) i (?:do|doing|studying|work(?:ing)? (?:on|in)|into)|what are my (?:interests|skills|technolog\w*)|my profile|about me)\b/i;
+const PROFILE_QUERY = new RegExp(
+  [
+    'who\\s*(?:am|m)\\s*i',
+    "what'?s my name", 'what is my name', 'what (?:was|were) my name',
+    '(?:do |did )?you (?:know|remember) (?:my name|me\\b)', 'know my name', 'remember my name', 'whats my name',
+    'what do you (?:know|remember) about me', 'remember about me',
+    'tell me (?:only )?(?:what|everything|all) you (?:actually )?(?:remember|know)',
+    'tell me about (?:me|myself)', 'my profile', 'about me',
+    "what'?s my (?:current |main |previous )?(?:tech ?)?(?:stack|role|job|profession|occupation|field|work)",
+    'what (?:do|am) i (?:do|doing|studying|building|work(?:ing)? (?:on|in)|into)',
+    'what (?:are|is) my (?:projects?|interests|skills|technolog\\w*|stack)',
+    "what'?s my (?:projects?|interests|skills)",
+    'what am i building', "what(?:'re| are) i building",
+    'what (?:did|have|has) (?:we|been) (?:decide|decided)', 'what did we decide', 'what have we decided',
+    'what decisions', "what'?s been decided", 'what we decided',
+  ].join('|'),
+  'i',
+);
 
 /** True if the message is asking the engine to recall the user's identity/profile. */
 export function isProfileQuery(message: string): boolean {
