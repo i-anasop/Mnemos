@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { clearTranscript } from '@/components/workspace/transcripts';
 
 /* Per-user workspaces (memory spaces). Each has its own memory context, scoped
    server-side by user_id + workspace_id. The list/active selection lives in
@@ -37,6 +38,8 @@ export interface WorkspacesState {
   active: Workspace | null;
   createWorkspace: (name: string) => Workspace | null;
   switchWorkspace: (id: string) => void;
+  renameWorkspace: (id: string, name: string) => void;
+  deleteWorkspace: (id: string) => void;
 }
 
 export function useWorkspaces(userId: string | null): WorkspacesState {
@@ -75,6 +78,27 @@ export function useWorkspaces(userId: string | null): WorkspacesState {
     return ws;
   }, [userId]);
 
+  const renameWorkspace = useCallback((id: string, name: string) => {
+    if (!userId || !name.trim()) return;
+    const list = readList(userId).map(w => w.id === id ? { ...w, name: name.trim(), updated_at: new Date().toISOString() } : w);
+    setWorkspaces(list);
+    try { localStorage.setItem(listKey(userId), JSON.stringify(list)); } catch { /* ignore */ }
+  }, [userId]);
+
+  const deleteWorkspace = useCallback((id: string) => {
+    if (!userId) return;
+    let list = readList(userId).filter(w => w.id !== id);
+    if (list.length === 0) list = [makeWorkspace(userId, 'Personal Memory')];
+    clearTranscript(userId, id);
+    setWorkspaces(list);
+    try { localStorage.setItem(listKey(userId), JSON.stringify(list)); } catch { /* ignore */ }
+    if (activeId === id) {
+      const next = list[0].id;
+      setActiveId(next);
+      try { localStorage.setItem(activeKey(userId), next); } catch { /* ignore */ }
+    }
+  }, [userId, activeId]);
+
   const active = workspaces.find(w => w.id === activeId) ?? null;
-  return { workspaces, activeId, active, createWorkspace, switchWorkspace };
+  return { workspaces, activeId, active, createWorkspace, switchWorkspace, renameWorkspace, deleteWorkspace };
 }

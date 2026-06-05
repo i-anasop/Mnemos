@@ -12,6 +12,8 @@ import { MnemosLogo } from '@/components/ui/Logo';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 import { useIdentity } from '@/components/workspace/useIdentity';
 import { useWorkspaces } from '@/components/workspace/useWorkspaces';
+import ProfileModal from '@/components/workspace/ProfileModal';
+import { loadTranscript, saveTranscript } from '@/components/workspace/transcripts';
 import type { AgentEvent, BlobMetadata, SynthesisDocument } from '@/types';
 
 interface BlobDetail {
@@ -23,10 +25,19 @@ interface BlobDetail {
   importance?: number;
 }
 
+/* Subtle, non-intrusive guest footnote under the chat input. */
+function GuestNote() {
+  return (
+    <p className="max-w-3xl mx-auto px-4 sm:px-6 pb-2 text-center text-[11px] text-[var(--faint)]">
+      Guest mode: memory and chats may not persist across devices. Connect your Sui wallet to enable persistent memory.
+    </p>
+  );
+}
+
 export default function WorkspacePage() {
   // Identity (wallet address or guest session id) + per-user workspaces.
-  const { userId, mode, shortAddress } = useIdentity();
-  const { workspaces, activeId, createWorkspace, switchWorkspace } = useWorkspaces(userId);
+  const { userId, mode, address, shortAddress } = useIdentity();
+  const { workspaces, activeId, createWorkspace, switchWorkspace, renameWorkspace, deleteWorkspace } = useWorkspaces(userId);
 
   const [turns, setTurns] = useState<Turn[]>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -34,8 +45,10 @@ export default function WorkspacePage() {
   const [selectedBlobId, setSelectedBlobId] = useState<string | null>(null);
   const [blobDetail, setBlobDetail] = useState<BlobDetail | null>(null);
   const [isBlobsLoading, setIsBlobsLoading] = useState(false);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [displayName, setDisplayName] = useState('');
+  const justLoadedRef = useRef(false);
   const feedBottomRef = useRef<HTMLDivElement>(null);
 
   // Open the sidebar by default on desktop; keep it closed (off-canvas) on phones.
@@ -63,14 +76,32 @@ export default function WorkspacePage() {
     void refreshBlobs();
   }, [refreshBlobs]);
 
-  // Switching user (wallet/guest) or workspace clears the on-screen conversation
-  // so contexts never bleed together.
+  // Switching user/workspace restores THAT chat's saved transcript (UI
+  // continuity) so the visible conversation never vanishes. New chats load empty.
   useEffect(() => {
-    setTurns([]);
     setBlobDetail(null);
     setSelectedBlobId(null);
-    setIsDrawerOpen(false);
+    if (!userId || !activeId) { setTurns([]); return; }
+    justLoadedRef.current = true;
+    setTurns(loadTranscript(userId, activeId));
   }, [userId, activeId]);
+
+  // Persist the transcript whenever it changes (skip the write right after a load).
+  useEffect(() => {
+    if (justLoadedRef.current) { justLoadedRef.current = false; return; }
+    if (userId && activeId) saveTranscript(userId, activeId, turns);
+  }, [turns, userId, activeId]);
+
+  // Local display name, per user.
+  useEffect(() => {
+    if (!userId) { setDisplayName(''); return; }
+    try { setDisplayName(localStorage.getItem(`mnemos-name:${userId}`) || ''); } catch { setDisplayName(''); }
+  }, [userId]);
+
+  const handleChangeName = useCallback((name: string) => {
+    setDisplayName(name);
+    if (userId) { try { localStorage.setItem(`mnemos-name:${userId}`, name); } catch { /* ignore */ } }
+  }, [userId]);
 
   useEffect(() => {
     document.title = 'Workspace · Mnemos';
@@ -90,6 +121,7 @@ export default function WorkspacePage() {
 
   const handleBlobSelect = useCallback(async (blobId: string) => {
     setSelectedBlobId(blobId);
+    setIsProfileOpen(false);
     closeSidebarOnMobile();
     try {
       const res = await fetch('/api/memory', {
@@ -116,10 +148,13 @@ export default function WorkspacePage() {
     setBlobDetail(null);
   }, []);
 
-  const handleNew = useCallback(() => {
+  // "New Chat" = a fresh, isolated memory chat (workspace). Switching to it
+  // loads an empty transcript via the load effect above.
+  const handleNewChat = useCallback(() => {
     if (isRunning) return;
-    setTurns([]);
-  }, [isRunning]);
+    createWorkspace('New chat');
+    closeSidebarOnMobile();
+  }, [isRunning, createWorkspace, closeSidebarOnMobile]);
 
   const handleQuery = useCallback(async (query: string) => {
     if (isRunning || !userId || !activeId) return;
@@ -223,32 +258,20 @@ export default function WorkspacePage() {
       <Sidebar
         open={isSidebarOpen}
         onToggle={() => setIsSidebarOpen(o => !o)}
-        onNew={() => { handleNew(); setIsDrawerOpen(false); }}
-        onOpenMemory={() => setIsDrawerOpen(true)}
-        memoryCount={blobs.length}
-        showMemory={isDrawerOpen}
-        onCloseMemory={() => { setIsDrawerOpen(false); handleBackToList(); }}
-        blobs={blobs}
-        selectedBlobId={selectedBlobId}
-        onSelectBlob={handleBlobSelect}
-        isBlobsLoading={isBlobsLoading}
-        mode={mode}
-        shortAddress={shortAddress}
+        onNewChat={handleNewChat}
         workspaces={workspaces}
         activeId={activeId}
-        onSwitchWorkspace={switchWorkspace}
-        onCreateWorkspace={createWorkspace}
+        onSwitchWorkspace={(id) => { switchWorkspace(id); closeSidebarOnMobile(); }}
+        onRenameWorkspace={renameWorkspace}
+        onDeleteWorkspace={deleteWorkspace}
+        mode={mode}
+        shortAddress={shortAddress}
+        displayName={displayName}
+        onOpenProfile={() => setIsProfileOpen(true)}
       />
 
       {/* ─── Main column ─────────────────────────────────────────────────── */}
       <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
-        {/* guest-mode warning */}
-        {mode === 'guest' && (
-          <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 text-[12px] bg-[#f59e0b]/10 border-b border-[#f59e0b]/25 text-[var(--ink)]">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b] flex-shrink-0" />
-            <span><span className="font-semibold">Guest mode:</span> your memory and chats may not be saved permanently. Connect your Sui wallet to keep persistent memory.</span>
-          </div>
-        )}
         {/* slim mobile top strip */}
         <div className="md:hidden flex items-center gap-2 px-3 py-2.5 border-b border-[var(--line)] flex-shrink-0 bg-[var(--paper)]/90 backdrop-blur-md">
           <button onClick={() => setIsSidebarOpen(true)} aria-label="Open menu" className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--muted)] hover:bg-[var(--card)]">
@@ -259,11 +282,9 @@ export default function WorkspacePage() {
             Mnemos
           </span>
           <div className="ml-auto flex items-center gap-1">
-            {hasActivity && (
-              <button onClick={handleNew} aria-label="New session" className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--muted)] hover:bg-[var(--card)]">
-                <Icon name="bolt" size={18} />
-              </button>
-            )}
+            <button onClick={handleNewChat} aria-label="New chat" className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--muted)] hover:bg-[var(--card)]">
+              <Icon name="plus" size={18} />
+            </button>
             <ThemeToggle />
           </div>
         </div>
@@ -303,12 +324,34 @@ export default function WorkspacePage() {
         {/* ─── Input dock (only once a conversation has started) ──────────── */}
         {hasActivity && (
           <div className="flex-shrink-0 bg-[var(--paper)]/95 backdrop-blur-md relative z-10">
-            <div className="max-w-3xl mx-auto px-4 sm:px-6 pb-3 w-full">
-              <QueryInput onSubmit={handleQuery} isRunning={isRunning} />
+            <div className="max-w-3xl mx-auto px-4 sm:px-6 pb-2 w-full">
+              <QueryInput onSubmit={handleQuery} isRunning={isRunning} large />
             </div>
+            {mode === 'guest' && <GuestNote />}
           </div>
         )}
+        {/* guest note in the empty state sits under the centered input */}
+        {!hasActivity && !blobDetail && mode === 'guest' && (
+          <div className="flex-shrink-0 pb-2"><GuestNote /></div>
+        )}
       </main>
+
+      <ProfileModal
+        open={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+        mode={mode}
+        userId={userId}
+        address={address}
+        shortAddress={shortAddress}
+        displayName={displayName}
+        onChangeName={handleChangeName}
+        workspaces={workspaces}
+        activeId={activeId}
+        blobs={blobs}
+        selectedBlobId={selectedBlobId}
+        isBlobsLoading={isBlobsLoading}
+        onSelectBlob={handleBlobSelect}
+      />
     </div>
   );
 }

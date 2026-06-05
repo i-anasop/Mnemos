@@ -103,19 +103,22 @@ export default function QueryInput({ onSubmit, isRunning, large = false }: Query
     e.target.value = '';
   };
 
-  // Auto-resize textarea
+  // Auto-resize textarea with a comfortable floor so it never collapses to a
+  // tiny single line after sending (consistent height in empty + docked states).
   useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
     ta.style.height = 'auto';
-    ta.style.height = `${Math.min(ta.scrollHeight, large ? 200 : 140)}px`;
+    const base = large ? 52 : 40;
+    const max = large ? 200 : 140;
+    ta.style.height = `${Math.min(Math.max(ta.scrollHeight, base), max)}px`;
   }, [query, large]);
 
   return (
     <div
       className={`bg-[var(--card)] border rounded-[1.75rem] shadow-[0_10px_36px_-16px_rgba(0,0,0,0.22)] transition-colors flex flex-col ${
         listening ? 'border-[#6366f1]' : 'border-[var(--line)] focus-within:border-[var(--muted)]'
-      } ${large ? 'px-5 pt-5 pb-3 min-h-[150px]' : 'px-4 pt-4 pb-2.5'}`}
+      } ${large ? 'px-5 pt-4 pb-3' : 'px-4 pt-4 pb-2.5'}`}
     >
       <textarea
         ref={textareaRef}
@@ -124,16 +127,16 @@ export default function QueryInput({ onSubmit, isRunning, large = false }: Query
         onKeyDown={handleKeyDown}
         placeholder={listening ? 'Listening…' : large ? 'How can Mnemos help you today?' : placeholder}
         disabled={isRunning}
-        rows={large ? 2 : 1}
+        rows={1}
         aria-label="Research query"
         className={`w-full bg-transparent text-[var(--ink)] placeholder-[var(--faint)] resize-none outline-none leading-relaxed disabled:opacity-50 ${
-          large ? 'text-[17px] flex-1' : 'text-[15px]'
+          large ? 'text-[16px]' : 'text-[15px]'
         }`}
       />
 
       <input ref={fileRef} type="file" multiple className="hidden" onChange={handleFiles} />
 
-      <div className={`flex items-center justify-between ${large ? 'mt-auto pt-2' : 'mt-2'}`}>
+      <div className="flex items-center justify-between mt-2">
         {/* left tools */}
         <div className="flex items-center gap-1">
           <button
