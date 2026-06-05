@@ -10,11 +10,9 @@ import MemoryDetail from '@/components/workspace/MemoryDetail';
 import TurnView, { type Turn } from '@/components/workspace/TurnView';
 import { MnemosLogo } from '@/components/ui/Logo';
 import ThemeToggle from '@/components/ui/ThemeToggle';
+import { useIdentity } from '@/components/workspace/useIdentity';
+import { useWorkspaces } from '@/components/workspace/useWorkspaces';
 import type { AgentEvent, BlobMetadata, SynthesisDocument } from '@/types';
-
-// Stable demo user ID — in production this comes from the connected Sui wallet.
-// Fresh identity for clean manual testing.
-const DEMO_USER_ID = 'manual-test-user';
 
 interface BlobDetail {
   blob_id: string;
@@ -25,9 +23,11 @@ interface BlobDetail {
   importance?: number;
 }
 
-const WORKSPACE_ID = 'manual-test-workspace';
-
 export default function WorkspacePage() {
+  // Identity (wallet address or guest session id) + per-user workspaces.
+  const { userId, mode, shortAddress } = useIdentity();
+  const { workspaces, activeId, createWorkspace, switchWorkspace } = useWorkspaces(userId);
+
   const [turns, setTurns] = useState<Turn[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [blobs, setBlobs] = useState<BlobMetadata[]>([]);
@@ -46,9 +46,10 @@ export default function WorkspacePage() {
   }, []);
 
   const refreshBlobs = useCallback(async () => {
+    if (!userId || !activeId) { setBlobs([]); return; }
     setIsBlobsLoading(true);
     try {
-      const res = await fetch(`/api/memory?user_id=${DEMO_USER_ID}&workspace_id=${WORKSPACE_ID}`);
+      const res = await fetch(`/api/memory?user_id=${encodeURIComponent(userId)}&workspace_id=${encodeURIComponent(activeId)}`);
       const data = (await res.json()) as { blobs: BlobMetadata[] };
       setBlobs(data.blobs.sort((a, b) => b.created_at.localeCompare(a.created_at)));
     } catch {
@@ -56,11 +57,20 @@ export default function WorkspacePage() {
     } finally {
       setIsBlobsLoading(false);
     }
-  }, []);
+  }, [userId, activeId]);
 
   useEffect(() => {
     void refreshBlobs();
   }, [refreshBlobs]);
+
+  // Switching user (wallet/guest) or workspace clears the on-screen conversation
+  // so contexts never bleed together.
+  useEffect(() => {
+    setTurns([]);
+    setBlobDetail(null);
+    setSelectedBlobId(null);
+    setIsDrawerOpen(false);
+  }, [userId, activeId]);
 
   useEffect(() => {
     document.title = 'Workspace · Mnemos';
@@ -112,7 +122,7 @@ export default function WorkspacePage() {
   }, [isRunning]);
 
   const handleQuery = useCallback(async (query: string) => {
-    if (isRunning) return;
+    if (isRunning || !userId || !activeId) return;
     closeSidebarOnMobile();
 
     const sessionId = uuidv4();
@@ -141,7 +151,7 @@ export default function WorkspacePage() {
       const res = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, session_id: sessionId, user_id: DEMO_USER_ID, workspace_id: WORKSPACE_ID, history }),
+        body: JSON.stringify({ query, session_id: sessionId, user_id: userId, workspace_id: activeId, history }),
       });
 
       if (!res.ok || !res.body) {
@@ -204,7 +214,7 @@ export default function WorkspacePage() {
     } finally {
       setIsRunning(false);
     }
-  }, [isRunning, refreshBlobs, closeSidebarOnMobile, turns]);
+  }, [isRunning, refreshBlobs, closeSidebarOnMobile, turns, userId, activeId]);
 
   const hasActivity = turns.length > 0;
 
@@ -222,10 +232,23 @@ export default function WorkspacePage() {
         selectedBlobId={selectedBlobId}
         onSelectBlob={handleBlobSelect}
         isBlobsLoading={isBlobsLoading}
+        mode={mode}
+        shortAddress={shortAddress}
+        workspaces={workspaces}
+        activeId={activeId}
+        onSwitchWorkspace={switchWorkspace}
+        onCreateWorkspace={createWorkspace}
       />
 
       {/* ─── Main column ─────────────────────────────────────────────────── */}
       <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
+        {/* guest-mode warning */}
+        {mode === 'guest' && (
+          <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 text-[12px] bg-[#f59e0b]/10 border-b border-[#f59e0b]/25 text-[var(--ink)]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b] flex-shrink-0" />
+            <span><span className="font-semibold">Guest mode:</span> your memory and chats may not be saved permanently. Connect your Sui wallet to keep persistent memory.</span>
+          </div>
+        )}
         {/* slim mobile top strip */}
         <div className="md:hidden flex items-center gap-2 px-3 py-2.5 border-b border-[var(--line)] flex-shrink-0 bg-[var(--paper)]/90 backdrop-blur-md">
           <button onClick={() => setIsSidebarOpen(true)} aria-label="Open menu" className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--muted)] hover:bg-[var(--card)]">

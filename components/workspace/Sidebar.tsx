@@ -6,6 +6,10 @@ import ThemeToggle from '@/components/ui/ThemeToggle';
 import { MnemosLogo } from '@/components/ui/Logo';
 import { SuiDroplet, WalToken } from '@/components/ui/Brand';
 import SidebarMemory from '@/components/workspace/SidebarMemory';
+import WorkspaceSwitcher from '@/components/workspace/WorkspaceSwitcher';
+import AccountPanel from '@/components/workspace/AccountPanel';
+import type { IdentityMode } from '@/components/workspace/useIdentity';
+import type { Workspace } from '@/components/workspace/useWorkspaces';
 import type { BlobMetadata } from '@/types';
 
 interface SidebarProps {
@@ -21,6 +25,13 @@ interface SidebarProps {
   selectedBlobId: string | null;
   onSelectBlob: (id: string) => void;
   isBlobsLoading: boolean;
+  // identity + workspaces
+  mode: IdentityMode;
+  shortAddress: string | null;
+  workspaces: Workspace[];
+  activeId: string | null;
+  onSwitchWorkspace: (id: string) => void;
+  onCreateWorkspace: (name: string) => void;
 }
 
 function NavItem({
@@ -43,6 +54,7 @@ function NavItem({
 export default function Sidebar({
   open, onToggle, onNew, onOpenMemory, memoryCount,
   showMemory, onCloseMemory, blobs, selectedBlobId, onSelectBlob, isBlobsLoading,
+  mode, shortAddress, workspaces, activeId, onSwitchWorkspace, onCreateWorkspace,
 }: SidebarProps) {
   // When showing memory, force the sidebar to its expanded width.
   const expanded = open || showMemory;
@@ -74,12 +86,15 @@ export default function Sidebar({
           </button>
         </div>
 
-        {/* active workspace */}
+        {/* active workspace selector */}
         {expanded && (
-          <div className="px-3.5 mt-1 mb-1 flex items-center gap-2 flex-shrink-0">
-            <span className="w-1.5 h-1.5 rounded-full grad-bg" />
-            <span className="text-[11px] font-semibold tracking-wide text-[var(--muted)]">Mnemos Demo</span>
-            <span className="text-[10px] text-[var(--faint)] ml-auto">workspace</span>
+          <div className="mt-1 mb-1 flex-shrink-0">
+            <WorkspaceSwitcher
+              workspaces={workspaces}
+              activeId={activeId}
+              onSwitch={onSwitchWorkspace}
+              onCreate={onCreateWorkspace}
+            />
           </div>
         )}
 
@@ -136,8 +151,9 @@ export default function Sidebar({
           )}
         </div>
 
-        {/* footer — live status card + theme toggle */}
-        <div className="p-2.5 flex-shrink-0">
+        {/* footer — account + live status card + theme toggle */}
+        <div className="p-2.5 flex-shrink-0 space-y-2">
+          {expanded && <AccountPanel mode={mode} shortAddress={shortAddress} />}
           {expanded ? (
             <div className="rounded-2xl border border-[var(--line)] overflow-hidden">
               {/* status header */}
